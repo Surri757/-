@@ -1,0 +1,31 @@
+version: '3.8'
+
+services:
+  bdc2026:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: bdc2026_quant
+    runtime: nvidia
+    environment:
+      - NVIDIA_VISIBLE_DEVICES=all
+      - CUDA_VISIBLE_DEVICES=0
+    volumes:
+      - ./app/data:/app/data
+      - ./app/output:/app/output
+      - ./app/temp:/app/temp
+    working_dir: /app
+    command: bash -c "bash code/init.sh && bash code/train.sh"
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: 1
+              capabilities: [gpu]
+    networks:
+      - bdc_network
+
+networks:
+  bdc_network:
+    driver: bridge
