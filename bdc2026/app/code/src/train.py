@@ -7,26 +7,68 @@ import os
 import sys
 import pickle
 import warnings
+from io import StringIO
 import numpy as np
 import pandas as pd
 from datetime import datetime, timedelta
 from sklearn.linear_model import Ridge
 from sklearn.preprocessing import StandardScaler
 import lightgbm as lgb
+
+# 创建模型日志目录
+MODEL_LOG_DIR = os.path.join(os.path.dirname(__file__), '..', 'logs')
+os.makedirs(MODEL_LOG_DIR, exist_ok=True)
+
+class ModelLogger:
+    """单个模型的日志记录器"""
+    def __init__(self, model_name):
+        self.model_name = model_name
+        self.log_file = os.path.join(MODEL_LOG_DIR, f'{model_name}.log')
+        self.f = open(self.log_file, 'w', encoding='utf-8')
+        
+    def log(self, message):
+        """输出日志到文件和控制台"""
+        timestamp = datetime.now().strftime('%H:%M:%S')
+        log_line = f"[{timestamp}] {message}\n"
+        self.f.write(log_line)
+        self.f.flush()
+        print(message, flush=True)
+        
+    def close(self):
+        self.f.close()
 import catboost as cb
 import xgboost as xgb
-import torch
-import torch.nn as nn
-from torch.utils.data import DataLoader, TensorDataset
+from concurrent.futures import ThreadPoolExecutor, ProcessPoolExecutor
+import multiprocessing
+
+# 尝试导入PyTorch，失败则禁用PyTorch模型
+torch_available = False
+try:
+    import torch
+    import torch.nn as nn
+    from torch.utils.data import DataLoader, TensorDataset
+    torch_available = True
+except Exception as e:
+    print(f"PyTorch加载失败: {e}")
+    print("将禁用PyTorch模型，只使用传统机器学习模型")
+    torch = None
+    nn = None
+    DataLoader = None
+    TensorDataset = None
 
 warnings.filterwarnings('ignore')
 
+# 设置最大线程数
+MAX_THREADS = min(multiprocessing.cpu_count(), 16)
+print(f"使用 {MAX_THREADS} 个线程进行并行处理")
+
 np.random.seed(42)
-torch.manual_seed(42)
-if torch.cuda.is_available():
-    torch.cuda.manual_seed_all(42)
-    torch.backends.cudnn.deterministic = True
-    torch.backends.cudnn.benchmark = False
+if torch_available and torch is not None:
+    torch.manual_seed(42)
+    if torch.cuda.is_available():
+        torch.cuda.manual_seed_all(42)
+        torch.backends.cudnn.deterministic = True
+        torch.backends.cudnn.benchmark = False
 
 sys.path.append(os.path.dirname(os.path.abspath(__file__)))
 from featurework import FeatureEngineering
@@ -40,11 +82,12 @@ def set_all_seeds(seed=42):
     random.seed(seed)
     os.environ['PYTHONHASHSEED'] = str(seed)
 
-    torch.manual_seed(seed)
-    if torch.cuda.is_available():
-        torch.cuda.manual_seed_all(seed)
-        torch.backends.cudnn.deterministic = True
-        torch.backends.cudnn.benchmark = False
+    if torch_available and torch is not None:
+        torch.manual_seed(seed)
+        if torch.cuda.is_available():
+            torch.cuda.manual_seed_all(seed)
+            torch.backends.cudnn.deterministic = True
+            torch.backends.cudnn.benchmark = False
 
     try:
         import lightgbm as lgb
@@ -136,7 +179,7 @@ class DLinearModel(nn.Module):
 
 class NGboostModel:
     """NGboost模型 - 量化预测不确定性"""
-    def __init__(self, n_estimators=600, learning_rate=0.04, max_depth=7):
+    def __init__(self, n_estimators=600, learning_rate=0.04, max_depth=7, early_stopping_rounds=10):
         from ngboost import NGBRegressor
         from ngboost.distns import Normal
         self.model = NGBRegressor(
@@ -144,7 +187,9 @@ class NGboostModel:
             learning_rate=learning_rate,
             Dist=Normal,
             random_state=42,
-            verbose=False
+            verbose=False,
+            validation_fraction=0.1,
+            early_stopping_rounds=early_stopping_rounds
         )
 
     def fit(self, X, y):
@@ -165,34 +210,50 @@ class StackingEnsemble:
         self.base_models = {}
         self.meta_model = None
         self.scaler = StandardScaler()
-        self.device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
+        # 设置设备
+        if torch_available and torch is not None:
+            self.device = torch.device('cuda:0' if torch.cuda.is_available() else 'cpu')
+            if torch.cuda.is_available():
+                print(f"使用GPU设备: {torch.cuda.get_device_name(0)}")
+            else:
+                print("使用CPU设备")
+        else:
+            self.device = 'cpu'
+            print("使用CPU设备 (PyTorch不可用)")
 
     def create_base_models(self):
-        """创建7个基础模型"""
+        """创建基础模型"""
         set_all_seeds(42)
 
         self.base_models = {
-            'ngboost': NGboostModel(n_estimators=600, learning_rate=0.04, max_depth=7),
+            'ngboost': NGboostModel(n_estimators=300, learning_rate=0.06, max_depth=6),
             'lightgbm': lgb.LGBMRegressor(
-                n_estimators=1000, learning_rate=0.03, max_depth=8, num_leaves=64,
-                random_state=42, verbose=-1, device='gpu' if torch.cuda.is_available() else 'cpu',
-                early_stopping_rounds=50, n_jobs=-1
+                n_estimators=200, learning_rate=0.08, max_depth=6, num_leaves=32,
+                random_state=42, verbose=-1, n_jobs=-1
             ),
             'catboost': cb.CatBoostRegressor(
-                n_estimators=800, learning_rate=0.04, max_depth=7,
-                random_state=42, verbose=0, task_type='GPU' if torch.cuda.is_available() else 'CPU',
-                early_stopping_rounds=50
+                n_estimators=200, learning_rate=0.08, max_depth=5,
+                random_state=42, verbose=0, task_type='CPU',
+                early_stopping_rounds=10
             ),
             'xgboost': xgb.XGBRegressor(
-                n_estimators=800, learning_rate=0.04, max_depth=7,
-                random_state=42, tree_method='hist' if torch.cuda.is_available() else 'hist',
-                device='cuda' if torch.cuda.is_available() else 'cpu',
-                early_stopping_rounds=50
-            ),
-            'patchtst': PatchTSTModel(seq_len=60, pred_len=1, d_model=64, n_heads=4, e_layers=3).to(self.device),
-            'timesnet': TimesNetModel(seq_len=60, pred_len=1, d_model=64, e_layers=2).to(self.device),
-            'dlinear': DLinearModel(seq_len=60, pred_len=1).to(self.device)
+                n_estimators=200, learning_rate=0.09, max_depth=5,
+                random_state=42, tree_method='hist',
+                device='cpu',
+                early_stopping_rounds=10
+            )
         }
+
+        # 如果PyTorch可用，添加PyTorch模型
+        if torch_available:
+            try:
+                self.base_models['patchtst'] = PatchTSTModel(seq_len=60, pred_len=1, d_model=64, n_heads=4, e_layers=3).to(self.device)
+                self.base_models['timesnet'] = TimesNetModel(seq_len=60, pred_len=1, d_model=64, e_layers=2).to(self.device)
+                self.base_models['dlinear'] = DLinearModel(seq_len=60, pred_len=1).to(self.device)
+                print("成功添加PyTorch模型")
+            except Exception as e:
+                print(f"添加PyTorch模型失败: {e}")
+                print("将只使用传统机器学习模型")
 
     def time_series_split(self, X, y, window_size=6, step=1):
         """时间序列滚动划分"""
@@ -227,29 +288,112 @@ class StackingEnsemble:
         X_train_subset = X_train[:-val_size]
         y_train_subset = y_train[:-val_size]
 
-        for name, model in self.base_models.items():
-            print(f"训练模型: {name}")
-            if name == 'ngboost':
+        def train_model(model_info):
+            """训练单个模型"""
+            model_name, model = model_info
+            logger = ModelLogger(model_name)
+            logger.log(f"开始训练模型: {model_name}")
+            if model_name == 'ngboost':
                 model.fit(X_train_subset, y_train_subset)
-            elif name == 'lightgbm':
+                logger.log(f"NGboost训练完成")
+            elif model_name == 'lightgbm':
                 model.fit(X_train_subset, y_train_subset, 
                          eval_set=[(X_val, y_val)],
                          eval_metric='mse')
-            elif name == 'catboost':
+                logger.log(f"LightGBM训练完成")
+            elif model_name == 'catboost':
                 model.fit(X_train_subset, y_train_subset, 
                          eval_set=[(X_val, y_val)],
                          use_best_model=True)
-            elif name == 'xgboost':
+                logger.log(f"CatBoost训练完成")
+            elif model_name == 'xgboost':
                 model.fit(X_train_subset, y_train_subset, 
                          eval_set=[(X_val, y_val)],
-                         eval_metric='rmse')
+                         eval_metric='rmse',
+                         verbose=False)
+                logger.log(f"XGBoost训练完成")
             else:
-                self.train_pytorch_model(model, X_train, y_train, epochs=50)
+                # PyTorch模型需要单独处理，因为GPU对象不能序列化
+                import torch
+                device = torch.device('cuda:0' if torch.cuda.is_available() else 'cpu')
+                model.to(device)
+                X_seq, y_seq = self.prepare_sequential_data(X_train, y_train)
+                val_size_seq = int(len(X_seq) * 0.1)
+                X_val_seq, y_val_seq = X_seq[-val_size_seq:], y_seq[-val_size_seq:]
+                X_train_subset_seq, y_train_subset_seq = X_seq[:-val_size_seq], y_seq[:-val_size_seq]
+                X_tensor = torch.FloatTensor(X_train_subset_seq).to(device)
+                y_tensor = torch.FloatTensor(y_train_subset_seq).to(device)
+                X_val_tensor = torch.FloatTensor(X_val_seq).to(device)
+                y_val_tensor = torch.FloatTensor(y_val_seq).to(device)
+                dataset = torch.utils.data.TensorDataset(X_tensor, y_tensor)
+                loader = torch.utils.data.DataLoader(dataset, batch_size=512, shuffle=False, num_workers=min(8, MAX_THREADS), pin_memory=True)
+                criterion = torch.nn.MSELoss()
+                optimizer = torch.optim.Adam(model.parameters(), lr=0.001)
+                scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(optimizer, T_max=30)
+                best_val_loss = float('inf')
+                patience = 10
+                patience_counter = 0
+                model.train()
+                for epoch in range(30):
+                    total_loss = 0
+                    for batch_X, batch_y in loader:
+                        optimizer.zero_grad()
+                        output = model(batch_X)
+                        loss = criterion(output.squeeze(), batch_y)
+                        loss.backward()
+                        optimizer.step()
+                        total_loss += loss.item()
+                    scheduler.step()
+                    model.eval()
+                    with torch.no_grad():
+                        val_output = model(X_val_tensor)
+                        val_loss = criterion(val_output.squeeze(), y_val_tensor).item()
+                    model.train()
+                    if (epoch + 1) % 5 == 0:
+                        print(f"  {model_name} Epoch {epoch+1}/30, Train Loss: {total_loss/len(loader):.6f}, Val Loss: {val_loss:.6f}")
+                    if val_loss < best_val_loss:
+                        best_val_loss = val_loss
+                        patience_counter = 0
+                    else:
+                        patience_counter += 1
+                        if patience_counter >= patience:
+                            print(f"  {model_name} Early stopping at epoch {epoch+1}")
+                            break
+                logger.log(f"PyTorch模型训练完成")
+            logger.close()
+            return model_name, model
+
+        # 并行训练模型
+        print(f"并行训练 {len(self.base_models)} 个基础模型...")
+        trained_models = {}
+        
+        # 分离模型为两组：可以并行的和需要单独处理的
+        model_pairs = list(self.base_models.items())
+        print(f"并行训练模型: {[name for name, _ in model_pairs]}")
+        
+        # 使用ProcessPoolExecutor并行训练
+        from concurrent.futures import ProcessPoolExecutor
+        max_workers = min(len(model_pairs), multiprocessing.cpu_count() // 2)
+        print(f"使用 {max_workers} 个进程进行并行训练")
+        
+        with ProcessPoolExecutor(max_workers=max_workers) as executor:
+            results = list(executor.map(train_model, model_pairs))
+        
+        # 收集训练结果
+        for name, model in results:
+            trained_models[name] = model
+        
+        # 更新模型字典
+        self.base_models.update(trained_models)
 
         print("基础模型训练完成")
 
-    def train_pytorch_model(self, model, X_train, y_train, epochs=50, batch_size=128):
+    def train_pytorch_model(self, model, X_train, y_train, epochs=30, batch_size=512):
         """训练PyTorch模型"""
+        if not torch_available or torch is None:
+            print("PyTorch不可用，跳过PyTorch模型训练")
+            return
+            
         set_all_seeds(42)
         X_seq, y_seq = self.prepare_sequential_data(X_train, y_train)
 
@@ -264,11 +408,15 @@ class StackingEnsemble:
         y_val_tensor = torch.FloatTensor(y_val).to(self.device)
 
         dataset = TensorDataset(X_tensor, y_tensor)
-        loader = DataLoader(dataset, batch_size=batch_size, shuffle=False)
+        # 使用更大的批处理大小和更多的工作线程
+        loader = DataLoader(dataset, batch_size=batch_size, shuffle=False, num_workers=min(8, MAX_THREADS), pin_memory=True)
 
         criterion = nn.MSELoss()
         optimizer = torch.optim.Adam(model.parameters(), lr=0.001)
         scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(optimizer, T_max=epochs)
+
+        # 启用混合精度训练
+        scaler = torch.cuda.amp.GradScaler() if torch.cuda.is_available() else None
 
         best_val_loss = float('inf')
         patience = 10
@@ -279,10 +427,21 @@ class StackingEnsemble:
             total_loss = 0
             for batch_X, batch_y in loader:
                 optimizer.zero_grad()
-                output = model(batch_X)
-                loss = criterion(output.squeeze(), batch_y)
-                loss.backward()
-                optimizer.step()
+                
+                # 混合精度训练
+                if scaler is not None:
+                    with torch.cuda.amp.autocast():
+                        output = model(batch_X)
+                        loss = criterion(output.squeeze(), batch_y)
+                    scaler.scale(loss).backward()
+                    scaler.step(optimizer)
+                    scaler.update()
+                else:
+                    output = model(batch_X)
+                    loss = criterion(output.squeeze(), batch_y)
+                    loss.backward()
+                    optimizer.step()
+                
                 total_loss += loss.item()
 
             scheduler.step()
@@ -290,11 +449,16 @@ class StackingEnsemble:
             # 验证
             model.eval()
             with torch.no_grad():
-                val_output = model(X_val_tensor)
-                val_loss = criterion(val_output.squeeze(), y_val_tensor).item()
+                if scaler is not None:
+                    with torch.cuda.amp.autocast():
+                        val_output = model(X_val_tensor)
+                        val_loss = criterion(val_output.squeeze(), y_val_tensor).item()
+                else:
+                    val_output = model(X_val_tensor)
+                    val_loss = criterion(val_output.squeeze(), y_val_tensor).item()
             model.train()
 
-            if (epoch + 1) % 10 == 0:
+            if (epoch + 1) % 5 == 0:
                 print(f"  Epoch {epoch+1}/{epochs}, Train Loss: {total_loss/len(loader):.6f}, Val Loss: {val_loss:.6f}")
 
             # 早停
@@ -315,29 +479,124 @@ class StackingEnsemble:
 
         oof_preds = np.zeros((n_samples, len(self.base_models)))
 
-        for fold_idx in range(n_folds):
+        def process_fold(fold_info):
+            """处理单个折的交叉验证"""
+            fold_idx, n_folds, X, y, fold_size, model_info = fold_info
             print(f"交叉验证 Fold {fold_idx + 1}/{n_folds}")
             val_start = fold_idx * fold_size
-            val_end = (fold_idx + 1) * fold_size if fold_idx < n_folds - 1 else n_samples
+            val_end = (fold_idx + 1) * fold_size if fold_idx < n_folds - 1 else len(X)
 
-            train_idx = list(range(0, val_start)) + list(range(val_end, n_samples))
+            train_idx = list(range(0, val_start)) + list(range(val_end, len(X)))
             val_idx = list(range(val_start, val_end))
 
             X_tr, y_tr = X[train_idx], y[train_idx]
             X_val, y_val = X[val_idx], y[val_idx]
 
-            for model_idx, (name, model) in enumerate(self.base_models.items()):
+            fold_preds = np.zeros((len(val_idx), len(model_info)))
+
+            for model_idx, (name, model) in enumerate(model_info.items()):
                 if name in ['ngboost', 'lightgbm', 'catboost', 'xgboost']:
                     model.fit(X_tr, y_tr)
-                    oof_preds[val_idx, model_idx] = model.predict(X_val)
+                    fold_preds[:, model_idx] = model.predict(X_val)
                 else:
-                    self.train_pytorch_model(model, X_tr, y_tr, epochs=30)
-                    X_seq, _ = self.prepare_sequential_data(X_val, np.zeros(len(X_val)))
-                    X_tensor = torch.FloatTensor(X_seq).to(self.device)
-                    model.eval()
-                    with torch.no_grad():
-                        preds = model(X_tensor).cpu().numpy().flatten()
-                    oof_preds[val_idx[:len(preds)], model_idx] = preds
+                    # 处理PyTorch模型
+                    if torch_available and torch is not None:
+                        try:
+                            import torch
+                            device = torch.device('cuda:0' if torch.cuda.is_available() else 'cpu')
+                            model.to(device)
+                            X_seq, y_seq = self.prepare_sequential_data(X_tr, y_tr)
+                            val_size = int(len(X_seq) * 0.1)
+                            X_val_seq, y_val_seq = X_seq[-val_size:], y_seq[-val_size:]
+                            X_train_subset, y_train_subset = X_seq[:-val_size], y_seq[:-val_size]
+                            X_tensor = torch.FloatTensor(X_train_subset).to(device)
+                            y_tensor = torch.FloatTensor(y_train_subset).to(device)
+                            X_val_tensor = torch.FloatTensor(X_val_seq).to(device)
+                            y_val_tensor = torch.FloatTensor(y_val_seq).to(device)
+                            dataset = torch.utils.data.TensorDataset(X_tensor, y_tensor)
+                            loader = torch.utils.data.DataLoader(dataset, batch_size=512, shuffle=False, num_workers=min(4, MAX_THREADS), pin_memory=True)
+                            criterion = torch.nn.MSELoss()
+                            optimizer = torch.optim.Adam(model.parameters(), lr=0.001)
+                            scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(optimizer, T_max=30)
+                            
+                            # 启用混合精度训练
+                            scaler = torch.cuda.amp.GradScaler() if torch.cuda.is_available() else None
+                            
+                            best_val_loss = float('inf')
+                            patience = 10
+                            patience_counter = 0
+                            model.train()
+                            for epoch in range(30):
+                                total_loss = 0
+                                for batch_X, batch_y in loader:
+                                    optimizer.zero_grad()
+                                    
+                                    # 混合精度训练
+                                    if scaler is not None:
+                                        with torch.cuda.amp.autocast():
+                                            output = model(batch_X)
+                                            loss = criterion(output.squeeze(), batch_y)
+                                        scaler.scale(loss).backward()
+                                        scaler.step(optimizer)
+                                        scaler.update()
+                                    else:
+                                        output = model(batch_X)
+                                        loss = criterion(output.squeeze(), batch_y)
+                                        loss.backward()
+                                        optimizer.step()
+                                    
+                                    total_loss += loss.item()
+                                scheduler.step()
+                                model.eval()
+                                with torch.no_grad():
+                                    if scaler is not None:
+                                        with torch.cuda.amp.autocast():
+                                            val_output = model(X_val_tensor)
+                                            val_loss = criterion(val_output.squeeze(), y_val_tensor).item()
+                                    else:
+                                        val_output = model(X_val_tensor)
+                                        val_loss = criterion(val_output.squeeze(), y_val_tensor).item()
+                                model.train()
+                                if patience_counter >= patience:
+                                    break
+                                if val_loss < best_val_loss:
+                                    best_val_loss = val_loss
+                                    patience_counter = 0
+                                else:
+                                    patience_counter += 1
+                            # 预测
+                            X_seq_val, _ = self.prepare_sequential_data(X_val, np.zeros(len(X_val)))
+                            X_tensor_val = torch.FloatTensor(X_seq_val).to(device)
+                            model.eval()
+                            with torch.no_grad():
+                                preds = model(X_tensor_val).cpu().numpy().flatten()
+                            fold_preds[:len(preds), model_idx] = preds
+                        except Exception as e:
+                            print(f"PyTorch模型训练失败: {e}")
+                            # 使用默认值填充
+                            fold_preds[:, model_idx] = 0
+                    else:
+                        # PyTorch不可用，使用默认值填充
+                        print("PyTorch不可用，跳过PyTorch模型训练")
+                        fold_preds[:, model_idx] = 0
+
+            return fold_idx, val_idx, fold_preds
+
+        # 准备交叉验证数据
+        model_info = self.base_models
+        fold_info_list = [(fold_idx, n_folds, X, y, fold_size, model_info) for fold_idx in range(n_folds)]
+
+        # 并行处理交叉验证
+        from concurrent.futures import ProcessPoolExecutor
+        max_workers = min(n_folds, multiprocessing.cpu_count() // 2)
+        print(f"使用 {max_workers} 个进程并行处理交叉验证")
+
+        with ProcessPoolExecutor(max_workers=max_workers) as executor:
+            results = list(executor.map(process_fold, fold_info_list))
+
+        # 收集结果
+        for fold_idx, val_idx, fold_preds in results:
+            oof_preds[val_idx, :] = fold_preds
 
         return oof_preds
 
@@ -512,7 +771,7 @@ def main():
 
     start_time = datetime.now()
 
-    data_dir = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), 'app', 'data')
+    data_dir = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), 'data')
     model_dir = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'model')
 
     df, industry_df, macro_df = load_all_data(data_dir)
@@ -525,7 +784,8 @@ def main():
     all_X = []
     all_y = []
 
-    for stock_id in stock_ids:
+    def process_stock(stock_id):
+        """处理单个股票的特征和目标变量"""
         stock_df = df[df['stock_id'] == stock_id].copy()
         stock_df = stock_df.sort_values('date')
         stock_df = stock_df.set_index('date')
@@ -540,7 +800,17 @@ def main():
         if len(valid_idx) > 100:
             X_stock = features.loc[valid_idx].fillna(0).values
             y_stock = target.loc[valid_idx].values
+            return X_stock, y_stock
+        return None, None
 
+    # 并行处理股票
+    print(f"并行处理 {len(stock_ids)} 只股票...")
+    with ThreadPoolExecutor(max_workers=MAX_THREADS) as executor:
+        results = list(executor.map(process_stock, stock_ids))
+
+    # 收集结果
+    for X_stock, y_stock in results:
+        if X_stock is not None and y_stock is not None:
             all_X.append(X_stock)
             all_y.append(y_stock)
 

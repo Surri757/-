@@ -39,21 +39,26 @@ def download_baostock_data():
     end_date = '2026-04-18'
 
     bs.login()
+    print(f"开始下载 {len(stock_codes)} 只股票数据...")
     for i, code in enumerate(stock_codes):
-        code = code.replace('.SH', '').replace('.SZ', '')
-        if code.startswith('6'):
+        original_code = code
+        if code.startswith('sh.') or code.startswith('sz.'):
+            bs_code = code
+            code = code.replace('sh.', '').replace('sz.', '')
+        elif code.startswith('6'):
             bs_code = f"sh.{code}"
         else:
             bs_code = f"sz.{code}"
 
         rs = bs.query_history_k_data_plus(
             bs_code,
-            "date,open,high,low,close,volume,amount,turnover_rate,pe,pb",
+            "date,open,high,low,close,volume,amount",
             start_date=start_date,
             end_date=end_date,
             frequency='d'
         )
 
+        row_count = 0
         while rs.error_code == '0' and rs.next():
             row = rs.get_row_data()
             all_data.append({
@@ -65,17 +70,18 @@ def download_baostock_data():
                 'close': float(row[4]) if row[4] else 0,
                 'volume': int(float(row[5])) if row[5] else 0,
                 'amount': float(row[6]) if row[6] else 0,
-                'turnover_rate': float(row[7]) if row[7] else 0,
-                'pe': float(row[8]) if row[8] else 0,
-                'pb': float(row[9]) if row[9] else 0,
+                'turnover_rate': 0,
+                'pe': 0,
+                'pb': 0,
             })
+            row_count += 1
 
         if (i + 1) % 50 == 0:
             print(f"已下载 {i+1}/{len(stock_codes)} 只股票")
 
     index_rs = bs.query_history_k_data_plus(
         "sh.000300",
-        "date,open,high,low,close,volume,amount,turnover_rate",
+        "date,open,high,low,close,volume,amount",
         start_date=start_date,
         end_date=end_date,
         frequency='d'
@@ -89,7 +95,7 @@ def download_baostock_data():
             'index_close': float(row[4]) if row[4] else 0,
             'index_volume': int(float(row[5])) if row[5] else 0,
             'index_amount': float(row[6]) if row[6] else 0,
-            'index_turnover': float(row[7]) if row[7] else 0,
+            'index_turnover': 0,
         })
 
     bs.logout()
@@ -99,8 +105,17 @@ def download_baostock_data():
 
     if stock_df is not None:
         print(f"成功下载 {len(stock_df)} 条股票记录")
+        stock_csv_path = os.path.join(os.path.dirname(__file__), '..', 'data', 'stock_data.csv')
+        os.makedirs(os.path.dirname(stock_csv_path), exist_ok=True)
+        stock_df.to_csv(stock_csv_path, index=False)
+        print(f"股票数据已保存到 {stock_csv_path}")
+    
     if index_df is not None:
         print(f"成功下载 {len(index_df)} 条沪深300指数记录")
+        index_csv_path = os.path.join(os.path.dirname(__file__), '..', 'data', 'index_data.csv')
+        os.makedirs(os.path.dirname(index_csv_path), exist_ok=True)
+        index_df.to_csv(index_csv_path, index=False)
+        print(f"指数数据已保存到 {index_csv_path}")
 
     return stock_df, index_df
 
@@ -298,18 +313,29 @@ def filter_st_stocks(df):
 
 def load_all_data(data_dir='../data'):
     """加载并融合所有数据源"""
-    print("从baostock下载沪深300成分股数据...")
-    stock_df, index_df = download_baostock_data()
+    stock_csv_path = os.path.join(os.path.dirname(__file__), '..', 'data', 'stock_data.csv')
+    index_csv_path = os.path.join(os.path.dirname(__file__), '..', 'data', 'index_data.csv')
+    
+    # 优先从本地CSV加载
+    if os.path.exists(stock_csv_path) and os.path.exists(index_csv_path):
+        print("从本地CSV文件加载数据...")
+        stock_df = pd.read_csv(stock_csv_path)
+        index_df = pd.read_csv(index_csv_path)
+        print(f"成功加载本地股票数据: {len(stock_df)} 条记录")
+        print(f"成功加载本地指数数据: {len(index_df)} 条记录")
+    else:
+        print("从baostock下载沪深300成分股数据...")
+        stock_df, index_df = download_baostock_data()
 
-    if stock_df is None:
-        print("baostock数据获取失败，使用本地数据")
-        train_path = os.path.join(data_dir, 'train.csv')
-        if os.path.exists(train_path):
-            stock_df = pd.read_csv(train_path)
-            print(f"成功加载本地数据: {len(stock_df)} 条记录")
-        else:
-            print("错误：本地数据不存在且baostock获取失败")
-            raise Exception("无法获取数据，请确保网络连接正常或提供本地数据")
+        if stock_df is None:
+            print("baostock数据获取失败，使用本地数据")
+            train_path = os.path.join(data_dir, 'train.csv')
+            if os.path.exists(train_path):
+                stock_df = pd.read_csv(train_path)
+                print(f"成功加载本地数据: {len(stock_df)} 条记录")
+            else:
+                print("错误：本地数据不存在且baostock获取失败")
+                raise Exception("无法获取数据，请确保网络连接正常或提供本地数据")
 
     macro_df = generate_macro_data()
 

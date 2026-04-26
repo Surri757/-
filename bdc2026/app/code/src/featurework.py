@@ -44,7 +44,6 @@ class FeatureEngineering:
         features['return_120d'] = close.pct_change(120)
 
         features['amplitude'] = (high - low) / close
-        features['volume_ratio'] = volume / volume.rolling(5).mean()
         features['turnover_rate'] = df['turnover_rate']
         features['log_amount'] = np.log1p(amount)
         features['volume_change'] = volume.pct_change()
@@ -52,9 +51,27 @@ class FeatureEngineering:
         features['open_close_ratio'] = open_p / close
         features['intraday_volatility'] = (high - low) / open_p
 
-        for window in [5, 10, 20, 60]:
-            features[f'volume_ma_ratio_{window}'] = volume / volume.rolling(window).mean()
-            features[f'amount_ma_ratio_{window}'] = amount / amount.rolling(window).mean()
+        # 计算滚动均值并缓存
+        volume_ma_5 = volume.rolling(5).mean()
+        volume_ma_10 = volume.rolling(10).mean()
+        volume_ma_20 = volume.rolling(20).mean()
+        volume_ma_60 = volume.rolling(60).mean()
+        
+        amount_ma_5 = amount.rolling(5).mean()
+        amount_ma_10 = amount.rolling(10).mean()
+        amount_ma_20 = amount.rolling(20).mean()
+        amount_ma_60 = amount.rolling(60).mean()
+
+        features['volume_ratio'] = volume / volume_ma_5
+        features['volume_ma_ratio_5'] = volume / volume_ma_5
+        features['volume_ma_ratio_10'] = volume / volume_ma_10
+        features['volume_ma_ratio_20'] = volume / volume_ma_20
+        features['volume_ma_ratio_60'] = volume / volume_ma_60
+        
+        features['amount_ma_ratio_5'] = amount / amount_ma_5
+        features['amount_ma_ratio_10'] = amount / amount_ma_10
+        features['amount_ma_ratio_20'] = amount / amount_ma_20
+        features['amount_ma_ratio_60'] = amount / amount_ma_60
 
         features['price_momentum_5'] = close / close.shift(5) - 1
         features['price_momentum_10'] = close / close.shift(10) - 1
@@ -77,9 +94,24 @@ class FeatureEngineering:
         low = df['low']
         volume = df['volume']
 
-        for window in [5, 10, 20, 60, 120]:
-            features[f'ma_{window}'] = close.rolling(window).mean()
-            features[f'ma_ratio_{window}'] = close / features[f'ma_{window}']
+        # 计算移动平均并缓存
+        ma_5 = close.rolling(5).mean()
+        ma_10 = close.rolling(10).mean()
+        ma_20 = close.rolling(20).mean()
+        ma_60 = close.rolling(60).mean()
+        ma_120 = close.rolling(120).mean()
+
+        features['ma_5'] = ma_5
+        features['ma_10'] = ma_10
+        features['ma_20'] = ma_20
+        features['ma_60'] = ma_60
+        features['ma_120'] = ma_120
+        
+        features['ma_ratio_5'] = close / ma_5
+        features['ma_ratio_10'] = close / ma_10
+        features['ma_ratio_20'] = close / ma_20
+        features['ma_ratio_60'] = close / ma_60
+        features['ma_ratio_120'] = close / ma_120
 
         exp12 = close.ewm(span=12, adjust=False).mean()
         exp26 = close.ewm(span=26, adjust=False).mean()
@@ -90,50 +122,65 @@ class FeatureEngineering:
         features['macd_hist'] = macd - signal
 
         delta = close.diff()
-        gain = (delta.where(delta > 0, 0)).rolling(window=14).mean()
-        loss = (-delta.where(delta < 0, 0)).rolling(window=14).mean()
-        rs = gain / loss
-        features['rsi_6'] = 100 - (100 / (1 + gain.rolling(6).mean() / loss.rolling(6).mean()))
-        features['rsi_12'] = 100 - (100 / (1 + gain.rolling(12).mean() / loss.rolling(12).mean()))
-        features['rsi_24'] = 100 - (100 / (1 + gain.rolling(24).mean() / loss.rolling(24).mean()))
+        gain = (delta.where(delta > 0, 0))
+        loss = (-delta.where(delta < 0, 0))
+        
+        gain_6 = gain.rolling(6).mean()
+        loss_6 = loss.rolling(6).mean()
+        gain_12 = gain.rolling(12).mean()
+        loss_12 = loss.rolling(12).mean()
+        gain_24 = gain.rolling(24).mean()
+        loss_24 = loss.rolling(24).mean()
+        
+        features['rsi_6'] = 100 - (100 / (1 + gain_6 / (loss_6 + 1e-8)))
+        features['rsi_12'] = 100 - (100 / (1 + gain_12 / (loss_12 + 1e-8)))
+        features['rsi_24'] = 100 - (100 / (1 + gain_24 / (loss_24 + 1e-8)))
 
         low_n = low.rolling(9).min()
         high_n = high.rolling(9).max()
-        k_raw = 100 * (close - low_n) / (high_n - low_n)
+        k_raw = 100 * (close - low_n) / (high_n - low_n + 1e-8)
         features['kdj_k'] = k_raw.rolling(3).mean()
         features['kdj_d'] = features['kdj_k'].rolling(3).mean()
         features['kdj_j'] = 3 * features['kdj_k'] - 2 * features['kdj_d']
 
-        features['bb_middle'] = close.rolling(20).mean()
+        features['bb_middle'] = ma_20
         bb_std = close.rolling(20).std()
         features['bb_upper'] = features['bb_middle'] + 2 * bb_std
         features['bb_lower'] = features['bb_middle'] - 2 * bb_std
-        features['bb_width'] = (features['bb_upper'] - features['bb_lower']) / features['bb_middle']
-        features['bb_position'] = (close - features['bb_lower']) / (features['bb_upper'] - features['bb_lower'])
+        features['bb_width'] = (features['bb_upper'] - features['bb_lower']) / (features['bb_middle'] + 1e-8)
+        features['bb_position'] = (close - features['bb_lower']) / (features['bb_upper'] - features['bb_lower'] + 1e-8)
 
-        features['atr_14'] = (high - low).rolling(14).mean() + (high - close).abs().rolling(14).mean() + (low - close).abs().rolling(14).mean()
-        features['atr_14'] = features['atr_14'] / 3
+        high_low = (high - low)
+        high_close = (high - close).abs()
+        low_close = (low - close).abs()
+        atr_14 = (high_low.rolling(14).mean() + high_close.rolling(14).mean() + low_close.rolling(14).mean()) / 3
+        features['atr_14'] = atr_14
 
         features['obv'] = (np.sign(close.diff()) * volume).cumsum()
         features['obv_ma'] = features['obv'].rolling(10).mean()
 
-        features['williams_r'] = -100 * (high.rolling(14).max() - close) / (high.rolling(14).max() - low.rolling(14).min())
+        high_14_max = high.rolling(14).max()
+        low_14_min = low.rolling(14).min()
+        features['williams_r'] = -100 * (high_14_max - close) / (high_14_max - low_14_min + 1e-8)
 
         typical_price = (high + low + close) / 3
-        features['cci_14'] = (typical_price - typical_price.rolling(14).mean()) / (0.015 * typical_price.rolling(14).std())
+        typical_price_14_mean = typical_price.rolling(14).mean()
+        typical_price_14_std = typical_price.rolling(14).std()
+        features['cci_14'] = (typical_price - typical_price_14_mean) / (0.015 * typical_price_14_std + 1e-8)
 
-        features['roc_12'] = (close - close.shift(12)) / close.shift(12) * 100
-        features['roc_24'] = (close - close.shift(24)) / close.shift(24) * 100
+        features['roc_12'] = (close - close.shift(12)) / (close.shift(12) + 1e-8) * 100
+        features['roc_24'] = (close - close.shift(24)) / (close.shift(24) + 1e-8) * 100
 
         high_diff = high.diff()
         low_diff = low.diff()
         plus_dm = high_diff.where((high_diff > low_diff) & (high_diff > 0), 0)
         minus_dm = low_diff.where((low_diff > high_diff) & (low_diff > 0), 0)
-        features['dmi_plus'] = 100 * plus_dm.rolling(14).mean() / features['atr_14']
-        features['dmi_minus'] = 100 * minus_dm.rolling(14).mean() / features['atr_14']
+        features['dmi_plus'] = 100 * plus_dm.rolling(14).mean() / (atr_14 + 1e-8)
+        features['dmi_minus'] = 100 * minus_dm.rolling(14).mean() / (atr_14 + 1e-8)
 
-        for window in [5, 10, 20]:
-            features[f'bias_{window}'] = (close - close.rolling(window).mean()) / close.rolling(window).mean() * 100
+        features['bias_5'] = (close - ma_5) / (ma_5 + 1e-8) * 100
+        features['bias_10'] = (close - ma_10) / (ma_10 + 1e-8) * 100
+        features['bias_20'] = (close - ma_20) / (ma_20 + 1e-8) * 100
 
         return features
 
