@@ -1,0 +1,103 @@
+[21:29:46] INFO - GPU: NVIDIA GeForce RTX 4060 Laptop GPU
+[21:29:46] INFO - ============================================================
+[21:29:46] INFO - 股价预测模型 - 训练主程序
+[21:29:46] INFO - 开始时间: 2026-05-05 21:29:46
+[21:29:46] INFO - ============================================================
+[21:29:56] INFO - 数据加载完成: 36120 条记录, 300 只股票
+[21:29:56] INFO - 开始特征工程 (300 只股票)...
+[21:30:39] INFO - 特征矩阵: (33845, 130), 目标: (33845,)
+[21:30:39] INFO - 波动率聚类分布: 低=16391, 中=8840, 高=8614
+[21:30:39] INFO - 样本权重: mean=1.74, 高权重占比=25.0%
+[21:30:39] INFO - 6模型方案: LightGBM + CatBoost + XGBoost + PatchTST + TimesNet + DLinear
+[21:30:39] INFO - 开始训练基础模型...
+[21:30:39] INFO - 训练集: 30461 样本, 验证集: 3384 样本
+[21:30:39] INFO - 并行训练 3 个ML模型...
+[21:30:39] INFO - 训练 lightgbm...
+[21:30:39] INFO - 训练 catboost...
+[21:30:39] INFO - 训练 xgboost...
+[21:30:40] INFO -   lightgbm val MSE=0.003326, IC=0.4360
+[21:30:47] INFO -   xgboost val MSE=0.002833, IC=0.5306
+[21:30:48] INFO -   catboost val MSE=0.003412, IC=0.4150
+[21:30:48] INFO - 串行训练 3 个PyTorch模型...
+[21:30:48] INFO - 训练 patchtst...
+[21:30:51] INFO -   patchtst Epoch 1/50, train=0.0294, val_loss=0.0038, val_ic=0.0409
+[21:30:59] INFO -   patchtst Epoch 5/50, train=0.0039, val_loss=0.0036, val_ic=0.1666
+[21:31:08] INFO -   patchtst Epoch 10/50, train=0.0037, val_loss=0.0036, val_ic=0.1905
+[21:31:17] INFO -   patchtst Epoch 15/50, train=0.0032, val_loss=0.0034, val_ic=0.3289
+[21:31:26] INFO -   patchtst Epoch 20/50, train=0.0027, val_loss=0.0033, val_ic=0.3522
+[21:31:35] INFO -   patchtst Epoch 25/50, train=0.0023, val_loss=0.0033, val_ic=0.3794
+[21:31:44] INFO -   patchtst Epoch 30/50, train=0.0020, val_loss=0.0032, val_ic=0.4095
+[21:31:53] INFO -   patchtst Epoch 35/50, train=0.0025, val_loss=0.0033, val_ic=0.3637
+[21:32:03] INFO -   patchtst Epoch 40/50, train=0.0017, val_loss=0.0031, val_ic=0.4109
+[21:32:12] INFO -   patchtst Epoch 45/50, train=0.0016, val_loss=0.0032, val_ic=0.3828
+[21:32:20] INFO -   patchtst 早停 @ epoch 49 (best_ic=0.4161)
+[21:32:20] INFO -   patchtst 训练完成 (最佳 val_loss=0.003073, val_ic=0.4161)
+[21:32:20] INFO - 训练 timesnet...
+[21:32:24] INFO -   timesnet Epoch 1/50, train=1.4683, val_loss=0.0035, val_ic=0.2832
+[21:32:40] INFO -   timesnet Epoch 5/50, train=0.0032, val_loss=0.0033, val_ic=0.3899
+[21:33:01] INFO -   timesnet Epoch 10/50, train=0.0028, val_loss=0.0031, val_ic=0.4040
+[21:33:21] INFO -   timesnet Epoch 15/50, train=0.0027, val_loss=0.0031, val_ic=0.4225
+[21:33:41] INFO -   timesnet Epoch 20/50, train=0.0023, val_loss=0.0031, val_ic=0.4374
+[21:34:02] INFO -   timesnet Epoch 25/50, train=0.0020, val_loss=0.0031, val_ic=0.4143
+[21:34:14] INFO -   timesnet 早停 @ epoch 28 (best_ic=0.4679)
+[21:34:14] INFO -   timesnet 训练完成 (最佳 val_loss=0.003052, val_ic=0.4679)
+[21:34:14] INFO - 训练 dlinear...
+[21:34:26] INFO -   dlinear Epoch 1/50, train=0.0314, val_loss=0.0070, val_ic=0.0608
+[21:35:11] INFO -   dlinear Epoch 5/50, train=0.0038, val_loss=0.0036, val_ic=0.2232
+[21:36:08] INFO -   dlinear Epoch 10/50, train=0.0034, val_loss=0.0033, val_ic=0.3034
+[21:37:06] INFO -   dlinear Epoch 15/50, train=0.0033, val_loss=0.0033, val_ic=0.3266
+[21:38:02] INFO -   dlinear Epoch 20/50, train=0.0031, val_loss=0.0032, val_ic=0.3442
+[21:38:59] INFO -   dlinear Epoch 25/50, train=0.0030, val_loss=0.0032, val_ic=0.3609
+[21:39:57] INFO -   dlinear Epoch 30/50, train=0.0030, val_loss=0.0032, val_ic=0.3769
+[21:40:54] INFO -   dlinear Epoch 35/50, train=0.0031, val_loss=0.0032, val_ic=0.3453
+[21:41:41] INFO -   dlinear 早停 @ epoch 39 (best_ic=0.3767)
+[21:41:41] INFO -   dlinear 训练完成 (最佳 val_loss=0.003162, val_ic=0.3767)
+[21:41:41] INFO - 基础模型训练完成
+[21:41:41] INFO - 生成OOF预测...
+[21:41:41] INFO - 时间序列滚动交叉验证 (6 折)...
+[21:41:41] WARNING -   Fold 1 训练集不足(需要>120, 当前0)，跳过
+[21:41:41] INFO -   Fold 2/6: train=5640, val=5640
+[21:42:36] INFO -   Fold 3/6: train=11280, val=5640
+[21:44:01] INFO -   Fold 4/6: train=16920, val=5640
+[21:46:28] INFO -   Fold 5/6: train=22560, val=5640
+[21:49:16] INFO -   Fold 6/6: train=28200, val=5645
+[21:53:03] INFO - 训练Stacking元模型...
+[21:53:03] INFO - NNLS权重: IC=0.3702, MSE=0.001886
+[21:53:03] INFO - IC优化权重: IC=0.3743, MSE=0.001890
+[21:53:03] INFO - 选用IC优化权重 (IC=0.3743)
+[21:53:03] INFO -   lightgbm: 0.0000 (被压缩)
+[21:53:03] INFO -   catboost: 0.2041 (有效)
+[21:53:03] INFO -   xgboost: 0.4349 (有效)
+[21:53:03] INFO -   patchtst: 0.0878 (有效)
+[21:53:03] INFO -   timesnet: 0.1468 (有效)
+[21:53:03] INFO -   dlinear: 0.1264 (有效)
+[21:53:03] INFO - 元模型 OOF MSE=0.001890, IC=0.3600
+[21:53:03] INFO - 
+============================================================
+[21:53:03] INFO - 模型评估结果
+[21:53:03] INFO - ============================================================
+[21:53:03] INFO - 
+lightgbm:
+[21:53:03] INFO -   MSE=0.002110, MAE=0.030577, R2=0.0708, IC=0.3845
+[21:53:03] INFO - 
+catboost:
+[21:53:03] INFO -   MSE=0.002161, MAE=0.031248, R2=0.0484, IC=0.3719
+[21:53:03] INFO - 
+xgboost:
+[21:53:03] INFO -   MSE=0.002042, MAE=0.030264, R2=0.1006, IC=0.4122
+[21:53:03] INFO - 
+patchtst:
+[21:53:03] INFO -   MSE=0.002315, MAE=0.031984, R2=-0.0141, IC=0.1663
+[21:53:03] INFO - 
+timesnet:
+[21:53:03] INFO -   MSE=0.002254, MAE=0.031863, R2=0.0129, IC=0.1805
+[21:53:03] INFO - 
+dlinear:
+[21:53:03] INFO -   MSE=0.002294, MAE=0.031454, R2=-0.0049, IC=0.2483
+[21:53:03] INFO - 
+Stacking Ensemble:
+[21:53:03] INFO -   MSE=0.001890, MAE=0.028666, R2=0.1252, IC=0.3600
+[21:53:03] INFO - 模型已保存到 D:\stockclone\bdc2026\app\code\src\model
+[21:53:03] INFO - ============================================================
+[21:53:03] INFO - 训练完成! 总耗时: 0.39 小时
+[21:53:03] INFO - ============================================================

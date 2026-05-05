@@ -1,0 +1,29 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(python -c ' *)",
+      "Bash(python -u src/train.py)",
+      "Bash(python -u src/test.py)",
+      "Bash(python \"D:/stockclone/bdc2026/app/code/src/test.py\")",
+      "Bash(python -c \"import py_compile; py_compile.compile\\('src/train.py', doraise=True\\); print\\('OK - train.py syntax valid'\\)\")",
+      "Bash(python -c \"import py_compile; py_compile.compile\\('bdc2026/app/code/src/test.py', doraise=True\\); print\\('Syntax OK'\\)\")",
+      "Bash(python -c \"from signal import SignalGenerator; from gate import LiveGate; from risk_manager import RiskManager; from executor import ExecutionSimulator; from review import ReviewLayer; print\\('All imports OK'\\)\")",
+      "Bash(python -c \"from train import *; print\\('train.py imports OK'\\)\")",
+      "Bash(python -c \"import train; print\\('train OK'\\)\")",
+      "Bash(pip show *)",
+      "Bash(python -c \"import pandas as pd; print\\('pandas OK', pd.__version__\\)\")",
+      "Bash(python train.py)",
+      "Bash(python -c \"import psutil; print\\([p.pid for p in psutil.process_iter\\(\\) if 'train.py' in ' '.join\\(p.cmdline\\(\\)\\)]\\)\")",
+      "Bash(tasklist //FI \"IMAGENAME eq python.exe\")",
+      "Bash(python test.py)",
+      "Bash(git add *)",
+      "Bash(git commit -m ' *)",
+      "Bash(git push *)",
+      "Bash(python -c \"import py_compile; py_compile.compile\\('train.py', doraise=True\\); py_compile.compile\\('monitor.py', doraise=True\\); print\\('Syntax OK'\\)\")",
+      "Bash(python -c \"import py_compile; py_compile.compile\\('train.py', doraise=True\\); print\\('OK'\\)\")",
+      "Bash(python -c \"import py_compile; py_compile.compile\\('train.py', doraise=True\\); print\\('Syntax OK'\\)\")",
+      "Bash(python -c \"import tqdm; print\\(f'tqdm {tqdm.__version__}'\\)\")",
+      "Bash(git checkout *)"
+    ]
+  }
+}

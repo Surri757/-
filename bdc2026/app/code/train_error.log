@@ -1,0 +1,120 @@
+Traceback (most recent call last):
+  File "D:\stockclone\bdc2026\app\code\src\train.py", line 512, in process_fold
+    fresh_model.fit(X_tr, y_tr)
+  File "D:\Miniconda3\Lib\site-packages\xgboost\core.py", line 751, in inner_f
+    return func(**kwargs)
+           ^^^^^^^^^^^^^^
+  File "D:\Miniconda3\Lib\site-packages\xgboost\sklearn.py", line 1368, in fit
+    self._Booster = train(
+                    ^^^^^^
+  File "D:\Miniconda3\Lib\site-packages\xgboost\core.py", line 751, in inner_f
+    return func(**kwargs)
+           ^^^^^^^^^^^^^^
+  File "D:\Miniconda3\Lib\site-packages\xgboost\training.py", line 201, in train
+    if cb_container.after_iteration(bst, i, dtrain, evals):
+       ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "D:\Miniconda3\Lib\site-packages\xgboost\callback.py", line 268, in after_iteration
+    ret = any(c.after_iteration(model, epoch, self.history) for c in self.callbacks)
+          ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "D:\Miniconda3\Lib\site-packages\xgboost\callback.py", line 268, in <genexpr>
+    ret = any(c.after_iteration(model, epoch, self.history) for c in self.callbacks)
+              ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "D:\Miniconda3\Lib\site-packages\xgboost\callback.py", line 460, in after_iteration
+    raise ValueError(msg)
+ValueError: Must have at least 1 validation dataset for early stopping.
+Traceback (most recent call last):
+  File "D:\stockclone\bdc2026\app\code\src\train.py", line 512, in process_fold
+    fresh_model.fit(X_tr, y_tr)
+  File "D:\Miniconda3\Lib\site-packages\xgboost\core.py", line 751, in inner_f
+    return func(**kwargs)
+           ^^^^^^^^^^^^^^
+  File "D:\Miniconda3\Lib\site-packages\xgboost\sklearn.py", line 1368, in fit
+    self._Booster = train(
+                    ^^^^^^
+  File "D:\Miniconda3\Lib\site-packages\xgboost\core.py", line 751, in inner_f
+    return func(**kwargs)
+           ^^^^^^^^^^^^^^
+  File "D:\Miniconda3\Lib\site-packages\xgboost\training.py", line 201, in train
+    if cb_container.after_iteration(bst, i, dtrain, evals):
+       ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "D:\Miniconda3\Lib\site-packages\xgboost\callback.py", line 268, in after_iteration
+    ret = any(c.after_iteration(model, epoch, self.history) for c in self.callbacks)
+          ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "D:\Miniconda3\Lib\site-packages\xgboost\callback.py", line 268, in <genexpr>
+    ret = any(c.after_iteration(model, epoch, self.history) for c in self.callbacks)
+              ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "D:\Miniconda3\Lib\site-packages\xgboost\callback.py", line 460, in after_iteration
+    raise ValueError(msg)
+ValueError: Must have at least 1 validation dataset for early stopping.
+Traceback (most recent call last):
+  File "D:\stockclone\bdc2026\app\code\src\train.py", line 512, in process_fold
+    fresh_model.fit(X_tr, y_tr)
+  File "D:\Miniconda3\Lib\site-packages\xgboost\core.py", line 751, in inner_f
+    return func(**kwargs)
+           ^^^^^^^^^^^^^^
+  File "D:\Miniconda3\Lib\site-packages\xgboost\sklearn.py", line 1368, in fit
+    self._Booster = train(
+                    ^^^^^^
+  File "D:\Miniconda3\Lib\site-packages\xgboost\core.py", line 751, in inner_f
+    return func(**kwargs)
+           ^^^^^^^^^^^^^^
+  File "D:\Miniconda3\Lib\site-packages\xgboost\training.py", line 201, in train
+    if cb_container.after_iteration(bst, i, dtrain, evals):
+       ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "D:\Miniconda3\Lib\site-packages\xgboost\callback.py", line 268, in after_iteration
+    ret = any(c.after_iteration(model, epoch, self.history) for c in self.callbacks)
+          ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "D:\Miniconda3\Lib\site-packages\xgboost\callback.py", line 268, in <genexpr>
+    ret = any(c.after_iteration(model, epoch, self.history) for c in self.callbacks)
+              ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "D:\Miniconda3\Lib\site-packages\xgboost\callback.py", line 460, in after_iteration
+    raise ValueError(msg)
+ValueError: Must have at least 1 validation dataset for early stopping.
+Traceback (most recent call last):
+  File "D:\stockclone\bdc2026\app\code\src\train.py", line 512, in process_fold
+    fresh_model.fit(X_tr, y_tr)
+  File "D:\Miniconda3\Lib\site-packages\xgboost\core.py", line 751, in inner_f
+    return func(**kwargs)
+           ^^^^^^^^^^^^^^
+  File "D:\Miniconda3\Lib\site-packages\xgboost\sklearn.py", line 1368, in fit
+    self._Booster = train(
+                    ^^^^^^
+  File "D:\Miniconda3\Lib\site-packages\xgboost\core.py", line 751, in inner_f
+    return func(**kwargs)
+           ^^^^^^^^^^^^^^
+  File "D:\Miniconda3\Lib\site-packages\xgboost\training.py", line 201, in train
+    if cb_container.after_iteration(bst, i, dtrain, evals):
+       ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "D:\Miniconda3\Lib\site-packages\xgboost\callback.py", line 268, in after_iteration
+    ret = any(c.after_iteration(model, epoch, self.history) for c in self.callbacks)
+          ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "D:\Miniconda3\Lib\site-packages\xgboost\callback.py", line 268, in <genexpr>
+    ret = any(c.after_iteration(model, epoch, self.history) for c in self.callbacks)
+              ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "D:\Miniconda3\Lib\site-packages\xgboost\callback.py", line 460, in after_iteration
+    raise ValueError(msg)
+ValueError: Must have at least 1 validation dataset for early stopping.
+Traceback (most recent call last):
+  File "D:\stockclone\bdc2026\app\code\src\train.py", line 512, in process_fold
+    fresh_model.fit(X_tr, y_tr)
+  File "D:\Miniconda3\Lib\site-packages\xgboost\core.py", line 751, in inner_f
+    return func(**kwargs)
+           ^^^^^^^^^^^^^^
+  File "D:\Miniconda3\Lib\site-packages\xgboost\sklearn.py", line 1368, in fit
+    self._Booster = train(
+                    ^^^^^^
+  File "D:\Miniconda3\Lib\site-packages\xgboost\core.py", line 751, in inner_f
+    return func(**kwargs)
+           ^^^^^^^^^^^^^^
+  File "D:\Miniconda3\Lib\site-packages\xgboost\training.py", line 201, in train
+    if cb_container.after_iteration(bst, i, dtrain, evals):
+       ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "D:\Miniconda3\Lib\site-packages\xgboost\callback.py", line 268, in after_iteration
+    ret = any(c.after_iteration(model, epoch, self.history) for c in self.callbacks)
+          ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "D:\Miniconda3\Lib\site-packages\xgboost\callback.py", line 268, in <genexpr>
+    ret = any(c.after_iteration(model, epoch, self.history) for c in self.callbacks)
+              ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "D:\Miniconda3\Lib\site-packages\xgboost\callback.py", line 460, in after_iteration
+    raise ValueError(msg)
+ValueError: Must have at least 1 validation dataset for early stopping.

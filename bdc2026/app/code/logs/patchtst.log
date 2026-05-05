@@ -1,0 +1,3 @@
+[17:48:07] 开始训练模型: patchtst
+[17:50:54] patchtst 触发早停 (epoch=4)
+[17:50:54] patchtst 训练完成

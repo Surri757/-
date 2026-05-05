@@ -1,0 +1,179 @@
+使用 16 个线程进行并行处理
+============================================================
+2026清华大学大数据挑战赛 - 训练主程序
+============================================================
+从本地CSV文件加载数据...
+成功加载本地股票数据: 770883 条记录
+成功加载本地指数数据: 2987 条记录
+生成宏观经济数据...
+生成申万行业指数数据...
+数据预处理...
+预处理后剩余 770387 条记录，298 只股票
+剔除ST股、停牌股、流动性差的股票...
+数据加载完成，共 670882 条记录
+开始特征工程...
+并行处理 298 只股票...
+特征矩阵形状: (669392, 129), 目标变量形状: (669392,)
+使用GPU设备: NVIDIA GeForce RTX 4060 Laptop GPU
+使用LightGBM + CatBoost + XGBoost + PatchTST + TimesNet + DLinear六模型方案
+开始训练基础模型...
+并行训练 3 个ML模型...
+开始训练模型: lightgbm
+开始训练模型: catboost开始训练模型: xgboost
+
+LightGBM 触发早停 (best_iteration=1)
+LightGBM训练完成
+XGBoost 触发早停 (best_iteration=6)
+XGBoost训练完成
+CatBoost 触发早停 (best_iteration=6)
+CatBoost训练完成
+串行训练 3 个PyTorch模型...
+开始训练模型: patchtst
+  patchtst Epoch 1/7, train_loss=0.0133, val_loss=0.0058
+  patchtst Epoch 2/7, train_loss=0.0051, val_loss=0.0054
+  patchtst Epoch 3/7, train_loss=0.0050, val_loss=0.0054
+  patchtst Epoch 4/7, train_loss=0.0049, val_loss=0.0054
+  patchtst Epoch 5/7, train_loss=0.0049, val_loss=0.0054
+patchtst 触发早停 (epoch=4)
+patchtst 训练完成
+开始训练模型: timesnet
+  timesnet Epoch 1/7, train_loss=0.0049, val_loss=0.0068
+  timesnet Epoch 2/7, train_loss=0.0048, val_loss=0.0054
+  timesnet Epoch 3/7, train_loss=0.0047, val_loss=0.0053
+  timesnet Epoch 4/7, train_loss=0.0047, val_loss=0.0053
+  timesnet Epoch 5/7, train_loss=0.0047, val_loss=0.0053
+  timesnet Epoch 6/7, train_loss=0.0046, val_loss=0.0053
+timesnet 触发早停 (epoch=5)
+timesnet 训练完成
+开始训练模型: dlinear
+  dlinear Epoch 1/7, train_loss=0.0050, val_loss=0.0053
+  dlinear Epoch 2/7, train_loss=0.0048, val_loss=0.0054
+  dlinear Epoch 3/7, train_loss=0.0048, val_loss=0.0054
+dlinear 触发早停 (epoch=2)
+dlinear 训练完成
+基础模型训练完成
+生成交叉验证预测用于元模型训练...
+使用 6 折时间序列滚动交叉验证（无未来数据泄露）...
+交叉验证 Fold 1/6
+  Fold 1 训练集太小，跳过
+交叉验证 Fold 2/6
+  Fold 2 xgboost 失败: Must have at least 1 validation dataset for early stopping.
+  Fold 2 patchtst Epoch 1/7, train_loss=0.0502, val_loss=0.0077
+  Fold 2 patchtst Epoch 2/7, train_loss=0.0075, val_loss=0.0058
+  Fold 2 patchtst Epoch 3/7, train_loss=0.0063, val_loss=0.0057
+  Fold 2 patchtst Epoch 4/7, train_loss=0.0060, val_loss=0.0057
+  Fold 2 patchtst Epoch 5/7, train_loss=0.0057, val_loss=0.0062
+  Fold 2 timesnet Epoch 1/7, train_loss=0.0053, val_loss=0.0057
+  Fold 2 timesnet Epoch 2/7, train_loss=0.0050, val_loss=0.0057
+  Fold 2 timesnet Epoch 3/7, train_loss=0.0050, val_loss=0.0057
+  Fold 2 timesnet Epoch 4/7, train_loss=0.0050, val_loss=0.0056
+  Fold 2 timesnet Epoch 5/7, train_loss=0.0050, val_loss=0.0056
+  Fold 2 timesnet Epoch 6/7, train_loss=0.0050, val_loss=0.0056
+  Fold 2 timesnet Epoch 7/7, train_loss=0.0050, val_loss=0.0056
+  Fold 2 dlinear Epoch 1/7, train_loss=0.0055, val_loss=0.0059
+  Fold 2 dlinear Epoch 2/7, train_loss=0.0051, val_loss=0.0066
+  Fold 2 dlinear Epoch 3/7, train_loss=0.0051, val_loss=0.0058
+  Fold 2 dlinear Epoch 4/7, train_loss=0.0051, val_loss=0.0058
+  Fold 2 dlinear Epoch 5/7, train_loss=0.0051, val_loss=0.0058
+  Fold 2 dlinear Epoch 6/7, train_loss=0.0050, val_loss=0.0059
+交叉验证 Fold 3/6
+  Fold 3 xgboost 失败: Must have at least 1 validation dataset for early stopping.
+  Fold 3 patchtst Epoch 1/7, train_loss=0.0275, val_loss=0.0101
+  Fold 3 patchtst Epoch 2/7, train_loss=0.0068, val_loss=0.0099
+  Fold 3 patchtst Epoch 3/7, train_loss=0.0063, val_loss=0.0088
+  Fold 3 patchtst Epoch 4/7, train_loss=0.0061, val_loss=0.0085
+  Fold 3 patchtst Epoch 5/7, train_loss=0.0061, val_loss=0.0084
+  Fold 3 patchtst Epoch 6/7, train_loss=0.0060, val_loss=0.0085
+  Fold 3 patchtst Epoch 7/7, train_loss=0.0059, val_loss=0.0084
+  Fold 3 timesnet Epoch 1/7, train_loss=0.0062, val_loss=0.0085
+  Fold 3 timesnet Epoch 2/7, train_loss=0.0058, val_loss=0.0085
+  Fold 3 timesnet Epoch 3/7, train_loss=0.0058, val_loss=0.0085
+  Fold 3 timesnet Epoch 4/7, train_loss=0.0057, val_loss=0.0085
+  Fold 3 timesnet Epoch 5/7, train_loss=0.0057, val_loss=0.0085
+  Fold 3 timesnet Epoch 6/7, train_loss=0.0057, val_loss=0.0085
+  Fold 3 dlinear Epoch 1/7, train_loss=0.0062, val_loss=0.0088
+  Fold 3 dlinear Epoch 2/7, train_loss=0.0058, val_loss=0.0086
+  Fold 3 dlinear Epoch 3/7, train_loss=0.0059, val_loss=0.0085
+  Fold 3 dlinear Epoch 4/7, train_loss=0.0058, val_loss=0.0086
+  Fold 3 dlinear Epoch 5/7, train_loss=0.0058, val_loss=0.0086
+交叉验证 Fold 4/6
+  Fold 4 xgboost 失败: Must have at least 1 validation dataset for early stopping.
+  Fold 4 patchtst Epoch 1/7, train_loss=0.0153, val_loss=0.0048
+  Fold 4 patchtst Epoch 2/7, train_loss=0.0063, val_loss=0.0047
+  Fold 4 patchtst Epoch 3/7, train_loss=0.0061, val_loss=0.0049
+  Fold 4 patchtst Epoch 4/7, train_loss=0.0060, val_loss=0.0048
+  Fold 4 timesnet Epoch 1/7, train_loss=0.0059, val_loss=0.0046
+  Fold 4 timesnet Epoch 2/7, train_loss=0.0058, val_loss=0.0046
+  Fold 4 timesnet Epoch 3/7, train_loss=0.0058, val_loss=0.0046
+  Fold 4 timesnet Epoch 4/7, train_loss=0.0058, val_loss=0.0046
+  Fold 4 timesnet Epoch 5/7, train_loss=0.0057, val_loss=0.0046
+  Fold 4 timesnet Epoch 6/7, train_loss=0.0057, val_loss=0.0046
+  Fold 4 timesnet Epoch 7/7, train_loss=0.0057, val_loss=0.0046
+  Fold 4 dlinear Epoch 1/7, train_loss=0.0060, val_loss=0.0046
+  Fold 4 dlinear Epoch 2/7, train_loss=0.0058, val_loss=0.0047
+  Fold 4 dlinear Epoch 3/7, train_loss=0.0058, val_loss=0.0046
+  Fold 4 dlinear Epoch 4/7, train_loss=0.0058, val_loss=0.0046
+  Fold 4 dlinear Epoch 5/7, train_loss=0.0058, val_loss=0.0046
+  Fold 4 dlinear Epoch 6/7, train_loss=0.0058, val_loss=0.0046
+  Fold 4 dlinear Epoch 7/7, train_loss=0.0058, val_loss=0.0046
+交叉验证 Fold 5/6
+  Fold 5 xgboost 失败: Must have at least 1 validation dataset for early stopping.
+  Fold 5 patchtst Epoch 1/7, train_loss=0.0138, val_loss=0.0039
+  Fold 5 patchtst Epoch 2/7, train_loss=0.0059, val_loss=0.0035
+  Fold 5 patchtst Epoch 3/7, train_loss=0.0057, val_loss=0.0034
+  Fold 5 patchtst Epoch 4/7, train_loss=0.0056, val_loss=0.0034
+  Fold 5 patchtst Epoch 5/7, train_loss=0.0056, val_loss=0.0034
+  Fold 5 patchtst Epoch 6/7, train_loss=0.0056, val_loss=0.0034
+  Fold 5 patchtst Epoch 7/7, train_loss=0.0056, val_loss=0.0034
+  Fold 5 timesnet Epoch 1/7, train_loss=0.0055, val_loss=0.0034
+  Fold 5 timesnet Epoch 2/7, train_loss=0.0055, val_loss=0.0036
+  Fold 5 timesnet Epoch 3/7, train_loss=0.0054, val_loss=0.0034
+  Fold 5 timesnet Epoch 4/7, train_loss=0.0054, val_loss=0.0034
+  Fold 5 timesnet Epoch 5/7, train_loss=0.0054, val_loss=0.0034
+  Fold 5 timesnet Epoch 6/7, train_loss=0.0053, val_loss=0.0033
+  Fold 5 timesnet Epoch 7/7, train_loss=0.0053, val_loss=0.0034
+  Fold 5 dlinear Epoch 1/7, train_loss=0.0066, val_loss=0.0047
+  Fold 5 dlinear Epoch 2/7, train_loss=0.0055, val_loss=0.0035
+  Fold 5 dlinear Epoch 3/7, train_loss=0.0055, val_loss=0.0034
+  Fold 5 dlinear Epoch 4/7, train_loss=0.0055, val_loss=0.0034
+  Fold 5 dlinear Epoch 5/7, train_loss=0.0055, val_loss=0.0034
+  Fold 5 dlinear Epoch 6/7, train_loss=0.0055, val_loss=0.0034
+  Fold 5 dlinear Epoch 7/7, train_loss=0.0055, val_loss=0.0034
+交叉验证 Fold 6/6
+  Fold 6 xgboost 失败: Must have at least 1 validation dataset for early stopping.
+  Fold 6 patchtst Epoch 1/7, train_loss=0.0146, val_loss=0.0038
+  Fold 6 patchtst Epoch 2/7, train_loss=0.0055, val_loss=0.0036
+  Fold 6 patchtst Epoch 3/7, train_loss=0.0054, val_loss=0.0036
+  Fold 6 patchtst Epoch 4/7, train_loss=0.0052, val_loss=0.0036
+  Fold 6 patchtst Epoch 5/7, train_loss=0.0052, val_loss=0.0036
+  Fold 6 patchtst Epoch 6/7, train_loss=0.0051, val_loss=0.0036
+  Fold 6 patchtst Epoch 7/7, train_loss=0.0051, val_loss=0.0037
+  Fold 6 timesnet Epoch 1/7, train_loss=0.0052, val_loss=0.0036
+  Fold 6 timesnet Epoch 2/7, train_loss=0.0050, val_loss=0.0036
+  Fold 6 timesnet Epoch 3/7, train_loss=0.0050, val_loss=0.0036
+  Fold 6 timesnet Epoch 4/7, train_loss=0.0050, val_loss=0.0035
+  Fold 6 timesnet Epoch 5/7, train_loss=0.0049, val_loss=0.0035
+  Fold 6 timesnet Epoch 6/7, train_loss=0.0049, val_loss=0.0035
+  Fold 6 timesnet Epoch 7/7, train_loss=0.0049, val_loss=0.0035
+  Fold 6 dlinear Epoch 1/7, train_loss=0.0057, val_loss=0.0037
+  Fold 6 dlinear Epoch 2/7, train_loss=0.0051, val_loss=0.0036
+  Fold 6 dlinear Epoch 3/7, train_loss=0.0051, val_loss=0.0036
+  Fold 6 dlinear Epoch 4/7, train_loss=0.0051, val_loss=0.0036
+  Fold 6 dlinear Epoch 5/7, train_loss=0.0050, val_loss=0.0036
+  Fold 6 dlinear Epoch 6/7, train_loss=0.0050, val_loss=0.0036
+  Fold 6 dlinear Epoch 7/7, train_loss=0.0050, val_loss=0.0036
+训练Stacking元模型...
+元模型训练完成
+
+【早停触发统计】
+  lightgbm: 1 次
+  xgboost: 1 次
+  catboost: 1 次
+  patchtst: 4 次
+  timesnet: 3 次
+  dlinear: 5 次
+
+所有模型已保存到 D:\stockclone\bdc2026\app\code\src\model
+============================================================
+训练完成! 总耗时: 0.45 小时
+============================================================

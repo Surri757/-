@@ -1,0 +1,103 @@
+[18:03:34] INFO - GPU: NVIDIA GeForce RTX 4060 Laptop GPU
+[18:03:34] INFO - ============================================================
+[18:03:34] INFO - 股价预测模型 - 训练主程序
+[18:03:34] INFO - 开始时间: 2026-05-05 18:03:34
+[18:03:34] INFO - ============================================================
+[18:03:46] INFO - 数据加载完成: 36120 条记录, 300 只股票
+[18:03:46] INFO - 开始特征工程 (300 只股票)...
+[18:04:22] INFO - 特征矩阵: (33845, 112), 目标: (33845,)
+[18:04:22] INFO - 波动率聚类分布: 低=16391, 中=8840, 高=8614
+[18:04:22] INFO - 样本权重: mean=1.74, 高权重占比=25.0%
+[18:04:22] INFO - 6模型方案: LightGBM + CatBoost + XGBoost + PatchTST + TimesNet + DLinear
+[18:04:22] INFO - 开始训练基础模型...
+[18:04:22] INFO - 训练集: 30461 样本, 验证集: 3384 样本
+[18:04:22] INFO - 并行训练 3 个ML模型...
+[18:04:22] INFO - 训练 lightgbm...
+[18:04:22] INFO - 训练 catboost...
+[18:04:22] INFO - 训练 xgboost...
+[18:04:23] ERROR -   xgboost 训练失败: [18:04:23] C:\actions-runner\_work\xgboost\xgboost\src\metric\../common/ranking_utils.h:218: Check failed: Groups() == info.weights_.Size() (1 vs. 30461) : Size of weight must equal to the number of query groups when ranking group is used.
+[18:04:24] INFO -   lightgbm val MSE=0.003305, IC=0.4417
+[18:04:24] INFO -   catboost val MSE=0.003413, IC=0.4252
+[18:04:24] INFO - 串行训练 3 个PyTorch模型...
+[18:04:24] INFO - 训练 patchtst...
+[18:04:28] INFO -   patchtst Epoch 1/50, train=0.0246, val_loss=0.0036, val_ic=0.1815
+[18:04:35] INFO -   patchtst Epoch 5/50, train=0.0037, val_loss=0.0036, val_ic=0.2211
+[18:04:44] INFO -   patchtst Epoch 10/50, train=0.0034, val_loss=0.0035, val_ic=0.2776
+[18:04:53] INFO -   patchtst Epoch 15/50, train=0.0033, val_loss=0.0036, val_ic=0.2994
+[18:05:02] INFO -   patchtst Epoch 20/50, train=0.0027, val_loss=0.0034, val_ic=0.3507
+[18:05:12] INFO -   patchtst Epoch 25/50, train=0.0023, val_loss=0.0034, val_ic=0.3623
+[18:05:20] INFO -   patchtst Epoch 30/50, train=0.0020, val_loss=0.0032, val_ic=0.3841
+[18:05:30] INFO -   patchtst Epoch 35/50, train=0.0027, val_loss=0.0032, val_ic=0.3742
+[18:05:39] INFO -   patchtst Epoch 40/50, train=0.0021, val_loss=0.0032, val_ic=0.3736
+[18:05:48] INFO -   patchtst Epoch 45/50, train=0.0018, val_loss=0.0031, val_ic=0.3991
+[18:05:58] INFO -   patchtst Epoch 50/50, train=0.0014, val_loss=0.0032, val_ic=0.3768
+[18:05:58] INFO -   patchtst 训练完成 (最佳 val_loss=0.003105, val_ic=0.3991)
+[18:05:58] INFO - 训练 timesnet...
+[18:06:02] INFO -   timesnet Epoch 1/50, train=7.7842, val_loss=0.0037, val_ic=-0.0170
+[18:06:15] INFO -   timesnet Epoch 5/50, train=0.0038, val_loss=0.0036, val_ic=-0.0080
+[18:06:32] INFO -   timesnet Epoch 10/50, train=0.0038, val_loss=0.0036, val_ic=-0.0224
+[18:06:50] INFO -   timesnet Epoch 15/50, train=0.0038, val_loss=0.0037, val_ic=-0.0085
+[18:06:53] INFO -   timesnet 早停 @ epoch 16 (best_ic=0.0209)
+[18:06:53] INFO -   timesnet 训练完成 (最佳 val_loss=0.003642, val_ic=0.0209)
+[18:06:53] INFO - 训练 dlinear...
+[18:07:04] INFO -   dlinear Epoch 1/50, train=0.0321, val_loss=0.0079, val_ic=0.0379
+[18:07:52] INFO -   dlinear Epoch 5/50, train=0.0039, val_loss=0.0037, val_ic=0.2025
+[18:08:51] INFO -   dlinear Epoch 10/50, train=0.0034, val_loss=0.0034, val_ic=0.2961
+[18:09:44] INFO -   dlinear Epoch 15/50, train=0.0033, val_loss=0.0034, val_ic=0.2775
+[18:10:37] INFO -   dlinear Epoch 20/50, train=0.0032, val_loss=0.0033, val_ic=0.3205
+[18:11:32] INFO -   dlinear Epoch 25/50, train=0.0031, val_loss=0.0032, val_ic=0.3619
+[18:12:25] INFO -   dlinear Epoch 30/50, train=0.0030, val_loss=0.0032, val_ic=0.3782
+[18:13:17] INFO -   dlinear Epoch 35/50, train=0.0032, val_loss=0.0033, val_ic=0.3285
+[18:13:59] INFO -   dlinear 早停 @ epoch 39 (best_ic=0.3779)
+[18:13:59] INFO -   dlinear 训练完成 (最佳 val_loss=0.003160, val_ic=0.3779)
+[18:13:59] INFO - 基础模型训练完成
+[18:13:59] INFO - 生成OOF预测...
+[18:13:59] INFO - 时间序列滚动交叉验证 (6 折)...
+[18:13:59] WARNING -   Fold 1 训练集不足(需要>120, 当前0)，跳过
+[18:13:59] INFO -   Fold 2/6: train=5640, val=5640
+[18:14:02] WARNING -   Fold 2 xgboost 失败: [18:14:02] C:\actions-runner\_work\xgboost\xgboost\src\metric\../common/ranking_utils.h:218: Check failed: Groups() == info.weights_.Size() (1 vs. 5640) : Size of weight must equal to the number of query groups when ranking group is used.
+[18:14:47] INFO -   Fold 3/6: train=11280, val=5640
+[18:14:49] WARNING -   Fold 3 xgboost 失败: [18:14:49] C:\actions-runner\_work\xgboost\xgboost\src\metric\../common/ranking_utils.h:218: Check failed: Groups() == info.weights_.Size() (1 vs. 11280) : Size of weight must equal to the number of query groups when ranking group is used.
+[18:16:13] INFO -   Fold 4/6: train=16920, val=5640
+[18:16:15] WARNING -   Fold 4 xgboost 失败: [18:16:15] C:\actions-runner\_work\xgboost\xgboost\src\metric\../common/ranking_utils.h:218: Check failed: Groups() == info.weights_.Size() (1 vs. 16920) : Size of weight must equal to the number of query groups when ranking group is used.
+[18:18:18] INFO -   Fold 5/6: train=22560, val=5640
+[18:18:20] WARNING -   Fold 5 xgboost 失败: [18:18:20] C:\actions-runner\_work\xgboost\xgboost\src\metric\../common/ranking_utils.h:218: Check failed: Groups() == info.weights_.Size() (1 vs. 22560) : Size of weight must equal to the number of query groups when ranking group is used.
+[18:21:13] INFO -   Fold 6/6: train=28200, val=5645
+[18:21:15] WARNING -   Fold 6 xgboost 失败: [18:21:15] C:\actions-runner\_work\xgboost\xgboost\src\metric\../common/ranking_utils.h:218: Check failed: Groups() == info.weights_.Size() (1 vs. 28200) : Size of weight must equal to the number of query groups when ranking group is used.
+[18:24:53] INFO - 训练Stacking元模型...
+[18:24:53] INFO - NNLS权重: IC=0.3513, MSE=0.001925
+[18:24:53] INFO - IC优化权重: IC=0.3526, MSE=0.001930
+[18:24:53] INFO - 选用IC优化权重 (IC=0.3526)
+[18:24:53] INFO -   lightgbm: 0.3142 (有效)
+[18:24:53] INFO -   catboost: 0.1377 (有效)
+[18:24:53] INFO -   xgboost: 0.1655 (有效)
+[18:24:53] INFO -   patchtst: 0.1462 (有效)
+[18:24:53] INFO -   timesnet: 0.1845 (有效)
+[18:24:53] INFO -   dlinear: 0.0519 (有效)
+[18:24:53] INFO - 元模型 OOF MSE=0.001930, IC=0.3472
+[18:24:53] INFO - 
+============================================================
+[18:24:53] INFO - 模型评估结果
+[18:24:53] INFO - ============================================================
+[18:24:53] INFO - 
+lightgbm:
+[18:24:53] INFO -   MSE=0.002100, MAE=0.030621, R2=0.0751, IC=0.3855
+[18:24:53] INFO - 
+catboost:
+[18:24:53] INFO -   MSE=0.002151, MAE=0.031126, R2=0.0529, IC=0.3744
+[18:24:53] INFO - 
+patchtst:
+[18:24:53] INFO -   MSE=0.002225, MAE=0.031656, R2=0.0256, IC=0.2341
+[18:24:53] INFO - 
+timesnet:
+[18:24:53] INFO -   MSE=0.002205, MAE=0.030233, R2=0.0345, IC=0.2308
+[18:24:53] INFO - 
+dlinear:
+[18:24:53] INFO -   MSE=0.002386, MAE=0.032325, R2=-0.0451, IC=0.2285
+[18:24:53] INFO - 
+Stacking Ensemble:
+[18:24:53] INFO -   MSE=0.001930, MAE=0.028379, R2=0.1063, IC=0.3472
+[18:24:54] INFO - 模型已保存到 D:\stockclone\bdc2026\app\code\src\model
+[18:24:54] INFO - ============================================================
+[18:24:54] INFO - 训练完成! 总耗时: 0.36 小时
+[18:24:54] INFO - ============================================================

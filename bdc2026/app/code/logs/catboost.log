@@ -1,0 +1,3 @@
+[17:48:03] 开始训练模型: catboost
+[17:48:07] CatBoost 触发早停 (best_iteration=6)
+[17:48:07] CatBoost训练完成

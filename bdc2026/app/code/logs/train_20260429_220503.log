@@ -1,0 +1,103 @@
+[22:05:05] INFO - GPU: NVIDIA GeForce RTX 4060 Laptop GPU
+[22:05:05] INFO - ============================================================
+[22:05:05] INFO - 股价预测模型 - 训练主程序
+[22:05:05] INFO - 开始时间: 2026-04-29 22:05:05
+[22:05:05] INFO - ============================================================
+[22:06:41] INFO - 数据加载完成: 71909 条记录, 300 只股票
+[22:06:41] INFO - 开始特征工程 (300 只股票)...
+[22:07:27] INFO - 特征矩阵: (70409, 133), 目标: (70409,)
+[22:07:27] INFO - 波动率聚类分布: 低=24496, 中=28692, 高=17221
+[22:07:27] INFO - 样本权重: mean=1.73, 高权重占比=24.4%
+[22:07:27] INFO - 6模型方案: LightGBM + CatBoost + XGBoost + PatchTST + TimesNet + DLinear
+[22:07:27] INFO - 开始训练基础模型...
+[22:07:27] INFO - 训练集: 63369 样本, 验证集: 7040 样本
+[22:07:27] INFO - 并行训练 3 个ML模型...
+[22:07:27] INFO - 训练 lightgbm...
+[22:07:27] INFO - 训练 catboost...
+[22:07:27] INFO - 训练 xgboost...
+[22:07:27] ERROR -   catboost 训练失败: catboost/private/libs/options/catboost_options.cpp:795: Error: default bootstrap type (bayesian) doesn't support 'subsample' option
+[22:07:28] INFO -   lightgbm val MSE=0.004196, IC=0.3690
+[22:07:28] INFO -   xgboost val MSE=0.004152, IC=0.3779
+[22:07:28] INFO - 串行训练 3 个PyTorch模型...
+[22:07:28] INFO - 训练 patchtst...
+[22:07:34] INFO -   patchtst Epoch 1/50, train=0.0096, val_loss=0.0044, val_ic=0.1223
+[22:07:47] INFO -   patchtst Epoch 5/50, train=0.0025, val_loss=0.0043, val_ic=0.2094
+[22:08:04] INFO -   patchtst Epoch 10/50, train=0.0024, val_loss=0.0040, val_ic=0.2526
+[22:08:21] INFO -   patchtst Epoch 15/50, train=0.0022, val_loss=0.0039, val_ic=0.3088
+[22:08:38] INFO -   patchtst Epoch 20/50, train=0.0018, val_loss=0.0038, val_ic=0.3329
+[22:08:55] INFO -   patchtst Epoch 25/50, train=0.0015, val_loss=0.0037, val_ic=0.3512
+[22:09:12] INFO -   patchtst Epoch 30/50, train=0.0014, val_loss=0.0037, val_ic=0.3617
+[22:09:30] INFO -   patchtst Epoch 35/50, train=0.0016, val_loss=0.0038, val_ic=0.3482
+[22:09:47] INFO -   patchtst 早停 @ epoch 39 (best_ic=0.3626)
+[22:09:47] INFO -   patchtst 训练完成 (最佳 val_loss=0.003687, val_ic=0.3626)
+[22:09:47] INFO - 训练 timesnet...
+[22:09:57] INFO -   timesnet Epoch 1/50, train=0.9321, val_loss=0.0042, val_ic=0.1079
+[22:10:29] INFO -   timesnet Epoch 5/50, train=0.0023, val_loss=0.0042, val_ic=0.1321
+[22:11:10] INFO -   timesnet Epoch 10/50, train=0.0023, val_loss=0.0041, val_ic=0.1826
+[22:11:50] INFO -   timesnet Epoch 15/50, train=0.0022, val_loss=0.0042, val_ic=0.1488
+[22:12:30] INFO -   timesnet Epoch 20/50, train=0.0022, val_loss=0.0042, val_ic=0.0472
+[22:12:30] INFO -   timesnet 早停 @ epoch 20 (best_ic=0.1826)
+[22:12:30] INFO -   timesnet 训练完成 (最佳 val_loss=0.004122, val_ic=0.1826)
+[22:12:30] INFO - 训练 dlinear...
+[22:12:57] INFO -   dlinear Epoch 1/50, train=0.0124, val_loss=0.0057, val_ic=0.0769
+[22:14:43] INFO -   dlinear Epoch 5/50, train=0.0023, val_loss=0.0039, val_ic=0.2734
+[22:16:48] INFO -   dlinear Epoch 10/50, train=0.0022, val_loss=0.0038, val_ic=0.3402
+[22:18:50] INFO -   dlinear Epoch 15/50, train=0.0022, val_loss=0.0038, val_ic=0.3258
+[22:20:52] INFO -   dlinear Epoch 20/50, train=0.0021, val_loss=0.0038, val_ic=0.3431
+[22:22:54] INFO -   dlinear Epoch 25/50, train=0.0021, val_loss=0.0037, val_ic=0.3672
+[22:24:56] INFO -   dlinear Epoch 30/50, train=0.0020, val_loss=0.0036, val_ic=0.3828
+[22:26:59] INFO -   dlinear Epoch 35/50, train=0.0021, val_loss=0.0038, val_ic=0.3304
+[22:29:02] INFO -   dlinear Epoch 40/50, train=0.0021, val_loss=0.0038, val_ic=0.3275
+[22:29:02] INFO -   dlinear 早停 @ epoch 40 (best_ic=0.3828)
+[22:29:02] INFO -   dlinear 训练完成 (最佳 val_loss=0.003632, val_ic=0.3828)
+[22:29:03] INFO - 基础模型训练完成
+[22:29:03] INFO - 生成OOF预测...
+[22:29:03] INFO - 时间序列滚动交叉验证 (6 折)...
+[22:29:03] WARNING -   Fold 1 训练集不足(需要>120, 当前0)，跳过
+[22:29:03] INFO -   Fold 2/6: train=11734, val=11734
+[22:29:03] WARNING -   Fold 2 catboost 失败: catboost/private/libs/options/catboost_options.cpp:795: Error: default bootstrap type (bayesian) doesn't support 'subsample' option
+[22:29:38] INFO -   Fold 3/6: train=23468, val=11734
+[22:29:38] WARNING -   Fold 3 catboost 失败: catboost/private/libs/options/catboost_options.cpp:795: Error: default bootstrap type (bayesian) doesn't support 'subsample' option
+[22:30:42] INFO -   Fold 4/6: train=35202, val=11734
+[22:30:43] WARNING -   Fold 4 catboost 失败: catboost/private/libs/options/catboost_options.cpp:795: Error: default bootstrap type (bayesian) doesn't support 'subsample' option
+[22:32:18] INFO -   Fold 5/6: train=46936, val=11734
+[22:32:18] WARNING -   Fold 5 catboost 失败: catboost/private/libs/options/catboost_options.cpp:795: Error: default bootstrap type (bayesian) doesn't support 'subsample' option
+[22:34:23] INFO -   Fold 6/6: train=58670, val=11739
+[22:34:24] WARNING -   Fold 6 catboost 失败: catboost/private/libs/options/catboost_options.cpp:795: Error: default bootstrap type (bayesian) doesn't support 'subsample' option
+[22:37:00] INFO - 训练Stacking元模型...
+[22:37:00] INFO - NNLS权重: IC=0.2853, MSE=0.002426
+[22:37:00] INFO - IC优化权重: IC=0.2870, MSE=0.002422
+[22:37:00] INFO - 选用IC优化权重 (IC=0.2870)
+[22:37:00] INFO -   lightgbm: 0.2774 (有效)
+[22:37:00] INFO -   catboost: 0.1635 (有效)
+[22:37:00] INFO -   xgboost: 0.1450 (有效)
+[22:37:00] INFO -   patchtst: 0.0000 (被压缩)
+[22:37:00] INFO -   timesnet: 0.2974 (有效)
+[22:37:00] INFO -   dlinear: 0.1167 (有效)
+[22:37:00] INFO - 元模型 OOF MSE=0.002422, IC=0.2575
+[22:37:00] INFO - 
+============================================================
+[22:37:00] INFO - 模型评估结果
+[22:37:00] INFO - ============================================================
+[22:37:00] INFO - 
+lightgbm:
+[22:37:00] INFO -   MSE=0.002813, MAE=0.037491, R2=-0.0282, IC=0.2748
+[22:37:00] INFO - 
+xgboost:
+[22:37:00] INFO -   MSE=0.002830, MAE=0.036988, R2=-0.0343, IC=0.2871
+[22:37:00] INFO - 
+patchtst:
+[22:37:00] INFO -   MSE=0.002899, MAE=0.037712, R2=-0.0603, IC=0.0609
+[22:37:00] INFO - 
+timesnet:
+[22:37:00] INFO -   MSE=0.002673, MAE=0.035018, R2=0.0225, IC=0.1833
+[22:37:00] INFO - 
+dlinear:
+[22:37:00] INFO -   MSE=0.003234, MAE=0.040092, R2=-0.1826, IC=0.1818
+[22:37:00] INFO - 
+Stacking Ensemble:
+[22:37:00] INFO -   MSE=0.002422, MAE=0.033447, R2=0.0747, IC=0.2575
+[22:37:00] INFO - 模型已保存到 D:\stockclone\bdc2026\app\code\src\model
+[22:37:00] INFO - ============================================================
+[22:37:00] INFO - 训练完成! 总耗时: 0.53 小时
+[22:37:00] INFO - ============================================================

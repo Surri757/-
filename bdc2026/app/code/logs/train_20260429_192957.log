@@ -1,0 +1,46 @@
+[19:29:59] INFO - GPU: NVIDIA GeForce RTX 4060 Laptop GPU
+[19:29:59] INFO - ============================================================
+[19:29:59] INFO - 股价预测模型 - 训练主程序
+[19:29:59] INFO - 开始时间: 2026-04-29 19:29:59
+[19:29:59] INFO - ============================================================
+[19:30:20] INFO - 数据加载完成: 71909 条记录, 300 只股票
+[19:30:20] INFO - 开始特征工程 (300 只股票)...
+[19:31:02] INFO - 特征矩阵: (70409, 133), 目标: (70409,)
+[19:31:02] INFO - 波动率聚类分布: 低=24496, 中=28692, 高=17221
+[19:31:02] INFO - 样本权重: mean=1.73, 高权重占比=24.4%
+[19:31:02] INFO - 6模型方案: LightGBM + CatBoost + XGBoost + PatchTST + TimesNet + DLinear
+[19:31:02] INFO - 开始训练基础模型...
+[19:31:02] INFO - 训练集: 63369 样本, 验证集: 7040 样本
+[19:31:02] INFO - 并行训练 3 个ML模型...
+[19:31:02] INFO - 训练 lightgbm...
+[19:31:02] ERROR -   lightgbm 训练失败: LGBMRegressor.fit() got an unexpected keyword argument 'feval'
+[19:31:02] INFO - 训练 catboost...
+[19:31:02] INFO - 训练 xgboost...
+[19:31:03] INFO -   catboost val MSE=0.004971, IC=0.1598
+[19:31:04] INFO -   xgboost val MSE=0.004152, IC=0.3779
+[19:31:04] INFO - 串行训练 3 个PyTorch模型...
+[19:31:04] INFO - 训练 patchtst...
+[19:31:09] INFO -   patchtst Epoch 1/50, train=0.0096, val=0.0044
+[19:31:23] INFO -   patchtst Epoch 5/50, train=0.0025, val=0.0043
+[19:31:40] INFO -   patchtst Epoch 10/50, train=0.0024, val=0.0040
+[19:31:57] INFO -   patchtst Epoch 15/50, train=0.0022, val=0.0039
+[19:32:14] INFO -   patchtst Epoch 20/50, train=0.0018, val=0.0038
+[19:32:32] INFO -   patchtst Epoch 25/50, train=0.0015, val=0.0037
+[19:32:50] INFO -   patchtst Epoch 30/50, train=0.0014, val=0.0037
+[19:33:09] INFO -   patchtst Epoch 35/50, train=0.0016, val=0.0038
+[19:33:21] INFO -   patchtst 早停 @ epoch 38
+[19:33:21] INFO -   patchtst 训练完成 (最佳 val_loss=0.003687)
+[19:33:21] INFO - 训练 timesnet...
+[19:33:29] INFO -   timesnet Epoch 1/50, train=0.9098, val=0.0041
+[19:34:01] INFO -   timesnet Epoch 5/50, train=0.0023, val=0.0039
+[19:34:42] INFO -   timesnet Epoch 10/50, train=0.0021, val=0.0038
+[19:35:22] INFO -   timesnet Epoch 15/50, train=0.0021, val=0.0038
+[19:36:03] INFO -   timesnet Epoch 20/50, train=0.0020, val=0.0037
+[19:36:43] INFO -   timesnet Epoch 25/50, train=0.0018, val=0.0036
+[19:37:24] INFO -   timesnet Epoch 30/50, train=0.0018, val=0.0036
+[19:38:04] INFO -   timesnet Epoch 35/50, train=0.0018, val=0.0037
+[19:38:28] INFO -   timesnet 早停 @ epoch 38
+[19:38:28] INFO -   timesnet 训练完成 (最佳 val_loss=0.003616)
+[19:38:28] INFO - 训练 dlinear...
+[19:38:54] INFO -   dlinear Epoch 1/50, train=0.0102, val=0.0054
+[19:40:35] INFO -   dlinear Epoch 5/50, train=0.0023, val=0.0039

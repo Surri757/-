@@ -1,0 +1,66 @@
+[21:48:12] INFO - GPU: NVIDIA GeForce RTX 4060 Laptop GPU
+[21:48:12] INFO - ============================================================
+[21:48:12] INFO - 动态1年窗口训练: 365天
+[21:48:12] INFO - 开始时间: 2026-04-28 21:48:12
+[21:48:12] INFO - ============================================================
+[21:49:25] INFO - 数据窗口: 2025-04-28 00:00:00 ~ 2026-04-28 00:00:00
+[21:49:25] INFO - 数据量: 71904 行, 300 只股票
+[21:49:25] INFO - 使用全部 300 只股票
+[21:49:25] INFO - 并行特征处理...
+[21:50:04] INFO - 特征矩阵: (70404, 127), 目标: (70404,)
+[21:50:04] INFO - 6模型方案: LightGBM + CatBoost + XGBoost + PatchTST + TimesNet + DLinear
+[21:50:04] INFO - 开始训练基础模型...
+[21:50:04] INFO - 训练集: 63364 样本, 验证集: 7040 样本
+[21:50:04] INFO - 并行训练 3 个ML模型...
+[21:50:04] INFO - 训练 lightgbm...
+[21:50:04] INFO - 训练 catboost...
+[21:50:04] INFO - 训练 xgboost...
+[21:50:05] INFO -   lightgbm val MSE=0.003764, IC=0.3982
+[21:50:10] INFO -   xgboost val MSE=0.003731, IC=0.4106
+[21:50:10] INFO -   catboost val MSE=0.003906, IC=0.3856
+[21:50:10] INFO - 串行训练 3 个PyTorch模型...
+[21:50:10] INFO - 训练 patchtst...
+[21:50:15] INFO -   patchtst Epoch 1/10, train=0.0180, val=0.0045
+[21:50:28] INFO -   patchtst Epoch 5/10, train=0.0027, val=0.0045
+[21:50:44] INFO -   patchtst Epoch 10/10, train=0.0026, val=0.0042
+[21:50:44] INFO -   patchtst 训练完成 (最佳 val_loss=0.004216)
+[21:50:45] INFO - 训练 timesnet...
+[21:50:53] INFO -   timesnet Epoch 1/10, train=0.3304, val=0.0048
+[21:51:26] INFO -   timesnet Epoch 5/10, train=0.0026, val=0.0045
+[21:51:51] INFO -   timesnet 早停 @ epoch 8
+[21:51:51] INFO -   timesnet 训练完成 (最佳 val_loss=0.004448)
+[21:51:51] INFO - 训练 dlinear...
+[21:52:12] INFO -   dlinear Epoch 1/10, train=6.8885, val=2.4529
+[21:53:35] INFO -   dlinear Epoch 5/10, train=0.4066, val=0.4212
+[21:55:23] INFO -   dlinear Epoch 10/10, train=0.2378, val=0.2845
+[21:55:23] INFO -   dlinear 训练完成 (最佳 val_loss=0.284509)
+[21:55:23] INFO - 基础模型训练完成
+[21:55:23] INFO - 生成OOF交叉验证预测...
+[21:55:23] INFO - 时间序列滚动交叉验证 (6 折)...
+[21:55:23] WARNING -   Fold 1 训练集太小，跳过
+[21:55:23] INFO -   Fold 2/6: train=11734, val=11734
+[21:55:24] WARNING -   Fold 2 xgboost 失败: Must have at least 1 validation dataset for early stopping.
+[21:57:15] INFO -   Fold 3/6: train=23468, val=11734
+[21:57:16] WARNING -   Fold 3 xgboost 失败: Must have at least 1 validation dataset for early stopping.
+[22:01:05] INFO -   Fold 4/6: train=35202, val=11734
+[22:01:06] WARNING -   Fold 4 xgboost 失败: Must have at least 1 validation dataset for early stopping.
+[22:06:30] INFO -   Fold 5/6: train=46936, val=11734
+[22:06:31] WARNING -   Fold 5 xgboost 失败: Must have at least 1 validation dataset for early stopping.
+[22:13:15] INFO -   Fold 6/6: train=58670, val=11734
+[22:13:16] WARNING -   Fold 6 xgboost 失败: Must have at least 1 validation dataset for early stopping.
+[22:25:47] INFO - 训练Stacking元模型...
+[22:25:47] INFO - 元模型训练完成 (alpha=0.01)
+[22:25:47] INFO - 元模型 OOF MSE=0.002513, IC=0.2649
+[22:25:47] INFO - 
+============================================================
+[22:25:47] INFO - 模型评估 (OOF)
+[22:25:47] INFO - ============================================================
+[22:25:47] INFO -   lightgbm: MSE=0.002625, R2=0.0907, IC=0.3024
+[22:25:47] INFO -   catboost: MSE=0.002679, R2=0.0722, IC=0.2624
+[22:25:47] INFO -   patchtst: MSE=0.003101, R2=-0.0754, IC=0.0841
+[22:25:47] INFO -   timesnet: MSE=0.002892, R2=-0.0030, IC=-0.0143
+[22:25:47] INFO -   dlinear: MSE=0.281759, R2=-96.7064, IC=0.0115
+[22:25:47] INFO -   Stacking Ensemble: MSE=0.002513, R2=0.0901, IC=0.2649
+[22:25:47] INFO - 模型已保存到 D:\stockclone\bdc2026\app\code\src\model
+[22:25:47] INFO - 
+训练完成! 总耗时: 37.6 分钟

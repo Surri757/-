@@ -1,0 +1,20 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(pip list *)",
+      "Bash(python -c \"import akshare; print\\('akshare version:', akshare.__version__\\)\")",
+      "Bash(python -c \"import tushare; print\\('tushare version:', tushare.__version__\\)\")",
+      "Bash(python -m py_compile data_fetcher.py)",
+      "Bash(python -m py_compile featurework.py)",
+      "Bash(python -m py_compile train.py)",
+      "Bash(python -m py_compile test.py)",
+      "Bash(python train.py)",
+      "Bash(python test.py)",
+      "Bash(python -c ' *)",
+      "Bash(python -c \"import py_compile; py_compile.compile\\('train.py', doraise=True\\); print\\('train.py OK'\\)\")",
+      "Bash(python -c \"import py_compile; py_compile.compile\\('featurework.py', doraise=True\\); print\\('featurework.py OK'\\)\")",
+      "Bash(python -c \"import py_compile; py_compile.compile\\('test.py', doraise=True\\); print\\('test.py OK'\\)\")",
+      "Bash(python -c \"from train import WeightedEnsemble; print\\('WeightedEnsemble imported OK'\\)\")"
+    ]
+  }
+}

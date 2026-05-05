@@ -1,0 +1,3 @@
+[17:48:03] 开始训练模型: lightgbm
+[17:48:05] LightGBM 触发早停 (best_iteration=1)
+[17:48:05] LightGBM训练完成

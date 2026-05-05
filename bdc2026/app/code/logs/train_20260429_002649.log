@@ -1,0 +1,92 @@
+[00:26:50] INFO - GPU: NVIDIA GeForce RTX 4060 Laptop GPU
+[00:26:50] INFO - ============================================================
+[00:26:50] INFO - 股价预测模型 - 训练主程序
+[00:26:50] INFO - 开始时间: 2026-04-29 00:26:50
+[00:26:50] INFO - ============================================================
+[00:29:43] INFO - 数据加载完成: 71616 条记录, 300 只股票
+[00:29:43] INFO - 开始特征工程 (300 只股票)...
+[00:30:24] INFO - 特征矩阵: (70116, 127), 目标: (70116,)
+[00:30:24] INFO - 6模型方案: LightGBM + CatBoost + XGBoost + PatchTST + TimesNet + DLinear
+[00:30:24] INFO - 开始训练基础模型...
+[00:30:24] INFO - 训练集: 63105 样本, 验证集: 7011 样本
+[00:30:24] INFO - 并行训练 3 个ML模型...
+[00:30:24] INFO - 训练 lightgbm...
+[00:30:24] INFO - 训练 catboost...
+[00:30:24] INFO - 训练 xgboost...
+[00:30:25] INFO -   lightgbm val MSE=0.003489, IC=0.4722
+[00:30:34] INFO -   xgboost val MSE=0.003433, IC=0.5031
+[00:30:34] INFO -   catboost val MSE=0.003617, IC=0.4597
+[00:30:34] INFO - 串行训练 3 个PyTorch模型...
+[00:30:34] INFO - 训练 patchtst...
+[00:30:39] INFO -   patchtst Epoch 1/50, train=0.0177, val=0.0045
+[00:30:53] INFO -   patchtst Epoch 5/50, train=0.0027, val=0.0046
+[00:31:09] INFO -   patchtst Epoch 10/50, train=0.0025, val=0.0042
+[00:31:26] INFO -   patchtst Epoch 15/50, train=0.0024, val=0.0042
+[00:31:43] INFO -   patchtst Epoch 20/50, train=0.0020, val=0.0040
+[00:32:00] INFO -   patchtst Epoch 25/50, train=0.0017, val=0.0039
+[00:32:17] INFO -   patchtst Epoch 30/50, train=0.0016, val=0.0038
+[00:32:35] INFO -   patchtst Epoch 35/50, train=0.0017, val=0.0039
+[00:32:54] INFO -   patchtst Epoch 40/50, train=0.0015, val=0.0038
+[00:33:16] INFO -   patchtst Epoch 45/50, train=0.0013, val=0.0039
+[00:33:25] INFO -   patchtst 早停 @ epoch 47
+[00:33:25] INFO -   patchtst 训练完成 (最佳 val_loss=0.003792)
+[00:33:25] INFO - 训练 timesnet...
+[00:33:32] INFO -   timesnet Epoch 1/50, train=1.5792, val=0.0047
+[00:34:01] INFO -   timesnet Epoch 5/50, train=0.0026, val=0.0041
+[00:34:35] INFO -   timesnet Epoch 10/50, train=0.0024, val=0.0041
+[00:35:08] INFO -   timesnet Epoch 15/50, train=0.0022, val=0.0041
+[00:35:42] INFO -   timesnet Epoch 20/50, train=0.0020, val=0.0039
+[00:36:19] INFO -   timesnet Epoch 25/50, train=0.0018, val=0.0038
+[00:36:54] INFO -   timesnet Epoch 30/50, train=0.0017, val=0.0038
+[00:37:28] INFO -   timesnet Epoch 35/50, train=0.0016, val=0.0040
+[00:37:28] INFO -   timesnet 早停 @ epoch 35
+[00:37:28] INFO -   timesnet 训练完成 (最佳 val_loss=0.003752)
+[00:37:28] INFO - 训练 dlinear...
+[00:37:55] INFO -   dlinear Epoch 1/50, train=0.0117, val=0.0055
+[00:39:42] INFO -   dlinear Epoch 5/50, train=0.0024, val=0.0041
+[00:41:51] INFO -   dlinear Epoch 10/50, train=0.0023, val=0.0039
+[00:43:44] INFO -   dlinear Epoch 15/50, train=0.0023, val=0.0040
+[00:45:58] INFO -   dlinear Epoch 20/50, train=0.0022, val=0.0039
+[00:45:58] INFO -   dlinear 早停 @ epoch 20
+[00:45:58] INFO -   dlinear 训练完成 (最佳 val_loss=0.003928)
+[00:45:58] INFO - 基础模型训练完成
+[00:45:58] INFO - 生成OOF预测...
+[00:45:58] INFO - 时间序列滚动交叉验证 (6 折)...
+[00:45:58] WARNING -   Fold 1 训练集不足(需要>120, 当前0)，跳过
+[00:45:58] INFO -   Fold 2/6: train=11686, val=11686
+[00:46:34] INFO -   Fold 3/6: train=23372, val=11686
+[00:47:34] INFO -   Fold 4/6: train=35058, val=11686
+[00:49:03] INFO -   Fold 5/6: train=46744, val=11686
+[00:51:00] INFO -   Fold 6/6: train=58430, val=11686
+[00:53:24] INFO - 训练Stacking元模型...
+[00:53:24] INFO - 元模型训练完成 (alpha=0.1)
+[00:53:24] INFO - 元模型 OOF MSE=0.002419, IC=0.3387
+[00:53:24] INFO - 
+============================================================
+[00:53:24] INFO - 模型评估结果
+[00:53:24] INFO - ============================================================
+[00:53:24] INFO - 
+lightgbm:
+[00:53:24] INFO -   MSE=0.002537, MAE=0.033023, R²=0.1220, IC=0.3666
+[00:53:24] INFO - 
+catboost:
+[00:53:24] INFO -   MSE=0.002548, MAE=0.033349, R²=0.1182, IC=0.3463
+[00:53:24] INFO - 
+xgboost:
+[00:53:24] INFO -   MSE=0.002522, MAE=0.033041, R²=0.1273, IC=0.3713
+[00:53:24] INFO - 
+patchtst:
+[00:53:24] INFO -   MSE=0.002997, MAE=0.038036, R²=-0.0382, IC=0.0737
+[00:53:24] INFO - 
+timesnet:
+[00:53:24] INFO -   MSE=0.002891, MAE=0.036000, R²=-0.0016, IC=0.1025
+[00:53:24] INFO - 
+dlinear:
+[00:53:24] INFO -   MSE=0.003413, MAE=0.041049, R²=-0.1824, IC=0.1830
+[00:53:24] INFO - 
+Stacking Ensemble:
+[00:53:24] INFO -   MSE=0.002419, MAE=0.032800, R²=0.1249, IC=0.3387
+[00:53:24] INFO - 模型已保存到 D:\stockclone\bdc2026\app\code\src\model
+[00:53:24] INFO - ============================================================
+[00:53:24] INFO - 训练完成! 总耗时: 0.44 小时
+[00:53:24] INFO - ============================================================
