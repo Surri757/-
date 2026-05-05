@@ -1,5 +1,5 @@
 """
-特征工程模块 - 8大类120个特征 (修复版)
+特征工程模块 - 9大类~127个特征 (含行为金融情绪因子)
 """
 import os
 import numpy as np
@@ -221,6 +221,117 @@ class FeatureEngineering:
 
         return features
 
+    def calculate_sentiment_factors(self, df):
+        """行为金融情绪因子 — 从价量数据捕捉散户情绪拐点
+
+        核心原理:
+        - FOMO: 突破关键位置+放量 = 散户追涨的量化信号
+        - 恐慌: 连续下跌+放量加速 = 散户崩溃割肉的量化信号
+        - 多空力量: 上下影线比例反映盘中买卖博弈
+        - 情绪拐点: 量价突变捕捉散户从理性→亢奋/恐慌的转折
+        - 行为偏差: 锚定效应/彩票偏好/处置效应
+        """
+        features = pd.DataFrame(index=df.index)
+
+        close = df['close']
+        open_p = df['open']
+        high = df['high']
+        low = df['low']
+        volume = df['volume']
+        amount = df['amount']
+        daily_ret = close.pct_change()
+        turnover = df.get('turnover_rate', pd.Series(0.0, index=df.index))
+
+        # ===== FOMO 追涨因子 =====
+
+        # 1. 突破信号: 收盘突破20日高点 + 放量
+        high_20d = high.rolling(20).max().shift(1)
+        breakout = (close > high_20d).astype(float)
+        vol_ma5 = volume.rolling(5).mean()
+        vol_surge = volume / (vol_ma5 + 1e-8)
+        features['breakout_fomo'] = breakout * vol_surge * daily_ret.rolling(3).mean()
+
+        # 2. 追涨强度: 连续阳线 + 量能递增
+        up_streak = (close > close.shift(1)).astype(int)
+        up_streak_3d = up_streak.rolling(3).sum()
+        vol_rising = (volume > volume.shift(3)).astype(float)
+        features['chase_strength'] = up_streak_3d * vol_rising * daily_ret.rolling(3).sum()
+
+        # 3. 换手率加速度: 散户参与度急剧上升 = 情绪升温
+        turn_ma10 = turnover.rolling(10).mean()
+        features['turnover_accel'] = (turnover - turn_ma10) / (turn_ma10 + 1e-8)
+
+        # ===== 恐慌割肉因子 =====
+
+        # 4. 恐慌割肉: 连跌3天 + 今天放量加速下跌
+        down_streak = (close < close.shift(1)).astype(int)
+        down_3d = down_streak.rolling(3).sum()
+        price_accel = (close - close.shift(3)) / (close.shift(3) + 1e-8)  # 3日跌幅
+        features['panic_selling'] = (down_3d >= 3).astype(float) * vol_surge * (-price_accel)
+
+        # 5. 成交量拐点: 缩量→突然放量，情绪的量化拐点
+        vol_ma20 = volume.rolling(20).mean()
+        vol_shrink = (vol_ma5 < vol_ma20 * 0.7).astype(float)  # 前5天缩量
+        vol_burst = (volume > vol_ma20 * 1.5).astype(float)     # 今日放量50%
+        features['volume_inflection'] = vol_shrink * vol_burst * daily_ret
+
+        # 6. 恐慌指数: 跌幅 + 量比 + 振幅 的三维共振
+        ret_rank = daily_ret.rolling(20).rank(pct=True)  # 今日收益在20日中的分位
+        vol_rank = volume.rolling(20).rank(pct=True)
+        amp = (high - low) / (close + 1e-8)
+        amp_rank = amp.rolling(20).rank(pct=True)
+        features['panic_index'] = (1 - ret_rank) * vol_rank * amp_rank
+
+        # ===== 多空力量因子 (microstructure sentiment) =====
+
+        # 7. 多空力量比: (收盘-最低) / (最高-收盘)
+        bull_power = close - low
+        bear_power = high - close
+        features['bull_bear_ratio'] = bull_power / (bear_power + 1e-8)
+
+        # 8. 上影线压力: 冲高回落比例
+        candle_range = high - low
+        features['upper_shadow_pct'] = (high - np.maximum(open_p, close)) / (candle_range + 1e-8)
+
+        # 9. 下影线支撑: 探底回升比例 (散户割肉后的承接力)
+        features['lower_shadow_pct'] = (np.minimum(open_p, close) - low) / (candle_range + 1e-8)
+
+        # 10. 开盘情绪: 开盘价相对前收的跳空
+        features['open_sentiment'] = (open_p - close.shift(1)) / (close.shift(1) + 1e-8)
+        features['open_sentiment_ma'] = features['open_sentiment'].rolling(5).mean()
+
+        # ===== 情绪拐点因子 =====
+
+        # 11. 短期动量加速: 5日收益 - 20日收益 (情绪升温/降温)
+        ret_5d = close.pct_change(5)
+        ret_20d = close.pct_change(20)
+        features['momentum_accel'] = ret_5d - ret_20d
+
+        # 12. 量价共振: 价涨量增=1, 价涨量缩=-1 (散户参与度变化)
+        price_dir = np.sign(daily_ret)
+        vol_dir = np.sign(volume - volume.shift(1))
+        features['price_vol_resonance'] = price_dir * vol_dir
+
+        # ===== 行为偏差因子 =====
+
+        # 13. 锚定偏差: 价格相对52周高点的距离 (散户"锚定"在最高价)
+        high_52w = high.rolling(120).max()
+        features['anchoring_gap'] = close / (high_52w + 1e-8) - 1
+        # 从高点回撤的加速度 (散户"越跌越买"的临界点)
+        pullback = (high_52w - close) / (high_52w + 1e-8)
+        features['pullback_accel'] = pullback - pullback.shift(5)
+
+        # 14. 彩票偏好: 高波动+高偏度 (散户追捧"彩票型"股票)
+        ret_skew = daily_ret.rolling(20).skew()  # 正偏度=彩票特征
+        ret_vol = daily_ret.rolling(20).std()
+        features['lottery_bias'] = ret_skew * ret_vol / (ret_vol.rolling(60).mean() + 1e-8)
+
+        # 15. 5日极端收益: 散户对"近期大涨股"的偏好 (MAX效应短期版)
+        features['max_ret_5d'] = daily_ret.rolling(5).max()
+        features['min_ret_5d'] = daily_ret.rolling(5).min()
+
+        return features
+
     def calculate_industry_macro_features(self, df, industry_df=None, macro_df=None):
         """行业与宏观特征（15个）"""
         features = pd.DataFrame(index=df.index)
@@ -402,6 +513,7 @@ class FeatureEngineering:
             self.calculate_basic_features(stock_df),
             self.calculate_technical_indicators(stock_df),
             self.calculate_alpha_factors(stock_df),
+            self.calculate_sentiment_factors(stock_df),
             self.calculate_industry_macro_features(stock_df, industry_df, macro_df),
             self.calculate_time_series_features(stock_df),
             self.calculate_valuation_features(stock_df),
