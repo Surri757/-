@@ -357,12 +357,34 @@ class DLinearModel(nn.Module):
         return out.squeeze(-1)
 
 
+class RankingMSELoss(nn.Module):
+    """MSE + Pairwise Ranking混合损失 (用于排序导向训练)"""
+    def __init__(self, alpha=0.3, margin=0.01):
+        super().__init__()
+        self.alpha = alpha
+        self.margin = margin
+        self.mse = nn.MSELoss()
+
+    def forward(self, pred, target):
+        mse_loss = self.mse(pred, target)
+        # Pairwise ranking loss within batch
+        pred_diff = pred.unsqueeze(1) - pred.unsqueeze(0)
+        target_diff = target.unsqueeze(1) - target.unsqueeze(0)
+        mask = (target_diff.abs() > 1e-6).float()
+        if mask.sum() < 1:
+            return mse_loss
+        rank_loss = torch.clamp(self.margin - torch.sign(target_diff) * pred_diff, min=0)
+        rank_loss = (rank_loss * mask).sum() / (mask.sum() + 1e-8)
+        return mse_loss + self.alpha * rank_loss
+
+
 class SequenceDataset:
-    """时序数据集"""
-    def __init__(self, X, y=None, seq_len=SEQ_LEN):
+    """时序数据集 (支持样本权重)"""
+    def __init__(self, X, y=None, seq_len=SEQ_LEN, sample_weight=None):
         self.X = np.asarray(X, dtype=np.float32)
         self.y = np.asarray(y, dtype=np.float32) if y is not None else None
         self.seq_len = seq_len
+        self.sample_weight = np.asarray(sample_weight, dtype=np.float32) if sample_weight is not None else None
 
     def __len__(self):
         return max(0, len(self.X) - self.seq_len)
@@ -371,7 +393,8 @@ class SequenceDataset:
         x = self.X[idx:idx + self.seq_len]
         if self.y is not None:
             y = self.y[idx + self.seq_len]
-            return torch.from_numpy(x), torch.tensor(y, dtype=torch.float32)
+            w = self.sample_weight[idx + self.seq_len] if self.sample_weight is not None else 1.0
+            return torch.from_numpy(x), torch.tensor(y, dtype=torch.float32), torch.tensor(w, dtype=torch.float32)
         return torch.from_numpy(x)
 
 
@@ -434,11 +457,12 @@ class StackingEnsemble:
         set_all_seeds()
         device_type = 'GPU' if (torch_available and torch is not None and torch.cuda.is_available()) else 'CPU'
 
-        # LightGBM: 回归目标 + Spearman排序评估（lambdarank要求整数标签）
+        # GBDT模型: 排序导向的损失函数
         self.base_models = {
             'lightgbm': lgb.LGBMRegressor(
                 n_estimators=GBDT_N_ESTIMATORS, learning_rate=GBDT_LR,
                 max_depth=GBDT_MAX_DEPTH, num_leaves=31,
+                objective='mae',  # MAE比MSE更鲁棒，排序效果更好
                 random_state=RANDOM_SEED, verbose=-1, n_jobs=-1,
                 subsample=0.8, colsample_bytree=0.8,
                 reg_alpha=0.1, reg_lambda=0.1
@@ -446,6 +470,7 @@ class StackingEnsemble:
             'catboost': cb.CatBoostRegressor(
                 iterations=GBDT_N_ESTIMATORS, learning_rate=GBDT_LR,
                 depth=GBDT_MAX_DEPTH, random_state=RANDOM_SEED,
+                loss_function='MAE',  # MAE for better ranking
                 verbose=0, task_type=device_type,
                 early_stopping_rounds=GBDT_EARLY_STOP,
                 l2_leaf_reg=3, border_count=128,
@@ -454,6 +479,7 @@ class StackingEnsemble:
             'xgboost': xgb.XGBRegressor(
                 n_estimators=GBDT_N_ESTIMATORS, learning_rate=GBDT_LR,
                 max_depth=GBDT_MAX_DEPTH, random_state=RANDOM_SEED,
+                objective='reg:squarederror',
                 tree_method='hist', device='cuda' if 'GPU' in device_type else 'cpu',
                 early_stopping_rounds=GBDT_EARLY_STOP,
                 subsample=0.8, colsample_bytree=0.8,
@@ -557,7 +583,7 @@ class StackingEnsemble:
                         model = DLinearModel(seq_len=SEQ_LEN, n_features=n_feat)
                     model = model.to(device)
 
-                    train_ds = SequenceDataset(X_tr, y_tr, SEQ_LEN)
+                    train_ds = SequenceDataset(X_tr, y_tr, SEQ_LEN, sw_tr)
                     val_ds = SequenceDataset(X_val, y_val, SEQ_LEN)
 
                     if len(train_ds) < 100:
@@ -587,20 +613,25 @@ class StackingEnsemble:
                     for epoch in range(PT_EPOCHS):
                         model.train()
                         train_loss = 0
-                        for batch_X, batch_y in train_loader:
-                            batch_X, batch_y = batch_X.to(device), batch_y.to(device)
+                        for batch_data in train_loader:
+                            batch_X, batch_y = batch_data[0], batch_data[1]
+                            batch_w = batch_data[2] if len(batch_data) > 2 else torch.ones_like(batch_y)
+                            batch_X, batch_y, batch_w = batch_X.to(device), batch_y.to(device), batch_w.to(device)
                             optimizer.zero_grad()
                             if scaler_amp:
                                 with torch.cuda.amp.autocast():
                                     out = model(batch_X)
-                                    loss = criterion(out, batch_y)
+                                    loss = criterion(out, batch_y) * batch_w.mean()
                                 scaler_amp.scale(loss).backward()
+                                scaler_amp.unscale_(optimizer)
+                                torch.nn.utils.clip_grad_norm_(model.parameters(), max_norm=1.0)
                                 scaler_amp.step(optimizer)
                                 scaler_amp.update()
                             else:
                                 out = model(batch_X)
-                                loss = criterion(out, batch_y)
+                                loss = criterion(out, batch_y) * batch_w.mean()
                                 loss.backward()
+                                torch.nn.utils.clip_grad_norm_(model.parameters(), max_norm=1.0)
                                 optimizer.step()
                             train_loss += loss.item()
 
@@ -612,7 +643,8 @@ class StackingEnsemble:
                         val_preds_list = []
                         val_targets_list = []
                         with torch.no_grad():
-                            for batch_X, batch_y in val_loader:
+                            for batch_data in val_loader:
+                                batch_X, batch_y = batch_data[0], batch_data[1]
                                 batch_X, batch_y = batch_X.to(device), batch_y.to(device)
                                 if scaler_amp:
                                     with torch.cuda.amp.autocast():
@@ -684,7 +716,7 @@ class StackingEnsemble:
                 return lgb.LGBMRegressor(
                     n_estimators=GBDT_N_ESTIMATORS, learning_rate=GBDT_LR,
                     max_depth=GBDT_MAX_DEPTH, num_leaves=31,
-                    random_state=RANDOM_SEED, verbose=-1, n_jobs=-1,
+                    objective='mae', random_state=RANDOM_SEED, verbose=-1, n_jobs=-1,
                     subsample=0.8, colsample_bytree=0.8
                 )
             elif name == 'catboost':
@@ -692,14 +724,14 @@ class StackingEnsemble:
                 return cb.CatBoostRegressor(
                     iterations=GBDT_N_ESTIMATORS, learning_rate=GBDT_LR,
                     depth=GBDT_MAX_DEPTH, random_state=RANDOM_SEED,
-                    verbose=0, task_type=dt, boosting_type='Plain'
+                    loss_function='MAE', verbose=0, task_type=dt, boosting_type='Plain'
                 )
             elif name == 'xgboost':
                 dt = 'cuda' if (torch_available and torch is not None and torch.cuda.is_available()) else 'cpu'
                 return xgb.XGBRegressor(
                     n_estimators=GBDT_N_ESTIMATORS, learning_rate=GBDT_LR,
                     max_depth=GBDT_MAX_DEPTH, random_state=RANDOM_SEED,
-                    tree_method='hist', device=dt
+                    objective='reg:squarederror', tree_method='hist', device=dt
                 )
             elif name == 'patchtst':
                 return PatchTSTModel(seq_len=SEQ_LEN, n_features=n_feat, d_model=D_MODEL,
@@ -743,7 +775,8 @@ class StackingEnsemble:
                         fold_preds[:, model_idx] = model.predict(X_val)
                     elif torch_available and torch is not None:
                         model = model.to(device)
-                        train_ds = SequenceDataset(X_tr, y_tr, SEQ_LEN)
+                        sw_fold = sample_weight[train_idx] if sample_weight is not None else None
+                        train_ds = SequenceDataset(X_tr, y_tr, SEQ_LEN, sw_fold)
                         if len(train_ds) < 100:
                             continue
 
@@ -754,38 +787,44 @@ class StackingEnsemble:
                         tr_loader = DataLoader(train_sub, batch_size=512, shuffle=False, num_workers=0, pin_memory=True)
                         vl_loader = DataLoader(val_sub, batch_size=512, shuffle=False, num_workers=0, pin_memory=True)
 
-                        criterion = nn.MSELoss()
+                        criterion = RankingMSELoss(alpha=0.2)
                         optimizer = torch.optim.Adam(model.parameters(), lr=PT_LR)
                         scaler_amp = torch.cuda.amp.GradScaler() if torch.cuda.is_available() else None
 
                         best_loss = float('inf')
                         pat = 0
-                        for epoch in range(5):  # CV中仅少量epoch，快速过拟合
+                        pt_cv_epochs = max(15, PT_EPOCHS // 3)  # CV中足够epoch保证质量
+                        for epoch in range(pt_cv_epochs):
                             model.train()
-                            for bx, by in tr_loader:
-                                bx, by = bx.to(device), by.to(device)
+                            for batch_data in tr_loader:
+                                bx, by = batch_data[0], batch_data[1]
+                                bw = batch_data[2] if len(batch_data) > 2 else torch.ones_like(by)
+                                bx, by, bw = bx.to(device), by.to(device), bw.to(device)
                                 optimizer.zero_grad()
                                 if scaler_amp:
                                     with torch.cuda.amp.autocast():
                                         out = model(bx)
-                                        loss = criterion(out, by)
+                                        loss = criterion(out, by) * bw.mean()
                                     scaler_amp.scale(loss).backward()
+                                    scaler_amp.unscale_(optimizer)
+                                    torch.nn.utils.clip_grad_norm_(model.parameters(), max_norm=1.0)
                                     scaler_amp.step(optimizer)
                                     scaler_amp.update()
                                 else:
-                                    loss = criterion(model(bx), by)
+                                    loss = criterion(model(bx), by) * bw.mean()
                                     loss.backward()
+                                    torch.nn.utils.clip_grad_norm_(model.parameters(), max_norm=1.0)
                                     optimizer.step()
 
                             model.eval()
-                            vl = sum(criterion(model(bx.to(device)), by.to(device)).item()
-                                    for bx, by in vl_loader) / max(len(vl_loader), 1)
+                            vl = sum(criterion(model(batch_data[0].to(device)), batch_data[1].to(device)).item()
+                                    for batch_data in vl_loader) / max(len(vl_loader), 1)
                             if vl < best_loss * 0.999:
                                 best_loss = vl
                                 pat = 0
                             else:
                                 pat += 1
-                                if pat >= 5:
+                                if pat >= 8:
                                     break
 
                         # 预测
@@ -922,7 +961,7 @@ def main():
     start_time = datetime.now()
 
     # 加载数据
-    df, industry_df, macro_df = load_all_data()
+    df, industry_df, macro_df = load_all_data(exclude_last_trading_days=120)
     logger.info(f"数据加载完成: {len(df)} 条记录, {df['stock_id'].nunique()} 只股票")
 
     # 特征工程
@@ -941,8 +980,8 @@ def main():
 
         close = stock_df['close']
         open_p = stock_df['open']
-        # T+1开盘买入 → T+5收盘卖出 的实际收益率
-        target = close.shift(-PRED_HORIZON) / (open_p.shift(-1) + 1e-8) - 1
+        # T+1开盘买入 → T+5开盘卖出的实际收益率
+        target = open_p.shift(-PRED_HORIZON) / (open_p.shift(-1) + 1e-8) - 1
 
         # 波动率聚类（基于60日历史波动率）
         cluster_id = compute_volatility_cluster(close)

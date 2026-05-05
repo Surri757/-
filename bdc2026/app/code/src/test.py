@@ -1,5 +1,5 @@
 """
-预测主程序 - Stacking集成 + Black-Litterman组合优化 (修复版)
+预测主程序 - 信号→Gate→执行→风控→复盘 分层架构
 """
 import os
 import sys
@@ -9,7 +9,6 @@ import numpy as np
 import pandas as pd
 from datetime import datetime
 from sklearn.preprocessing import StandardScaler
-from scipy.optimize import minimize
 
 warnings.filterwarnings('ignore')
 
@@ -17,9 +16,11 @@ warnings.filterwarnings('ignore')
 RANDOM_SEED = 42
 SEQ_LEN = 60
 PRED_HORIZON = 5
-RISK_AVERSION = 1.2
-MAX_INDUSTRY_WEIGHT = 0.4     # 仅行业集中度约束
-MAX_VOLATILITY_RATIO = 1.2
+
+# 风控参数
+MAX_LOSS_PER_POSITION = 0.02   # 每笔最多亏总资金2%
+MAX_TOTAL_EXPOSURE = 1.0       # 总仓位上限
+SL_ATR_MULTIPLIER = 2.0        # 止损=ATR倍数
 
 # 路径
 BASE_DIR = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
@@ -38,8 +39,12 @@ sys.path.append(os.path.dirname(os.path.abspath(__file__)))
 from featurework import FeatureEngineering
 from train import (PatchTSTModel, TimesNetModel, DLinearModel, SequenceDataset,
                    set_all_seeds, GBDT_N_ESTIMATORS, GBDT_LR, GBDT_MAX_DEPTH,
-                   D_MODEL, N_HEADS, E_LAYERS, PATCH_LEN, STRIDE,
-                   compute_volatility_cluster, WeightedEnsemble)
+                   D_MODEL, N_HEADS, E_LAYERS, PATCH_LEN, STRIDE, WeightedEnsemble)
+from signals import SignalGenerator
+from gate import LiveGate
+from risk_manager import RiskManager
+from executor import ExecutionSimulator
+from review import ReviewLayer
 
 device = torch.device('cuda:0' if torch.cuda.is_available() else 'cpu')
 if torch.cuda.is_available():
@@ -284,205 +289,67 @@ def get_industry(stock_id):
 
 
 class MarketRegime:
-    """市场状态检测器"""
+    """市场状态检测器 — 影响止损宽度
+
+    牛市放宽止损让利润奔跑，恐慌收紧止损快速截断亏损。
+    """
 
     @staticmethod
-    def detect(index_returns, index_vol, predicted_returns):
+    def detect(index_returns, predicted_returns):
         """
-        检测当前市场状态
-        Returns: regime, total_exposure, concentration_preference
-        regime: 'bull' | 'sideways' | 'bear' | 'panic'
-        total_exposure: 建议总仓位比例 0~1
-        concentration_preference: 0=分散, 1=集中
+        Returns: (regime, sl_multiplier)
+        regime: 'bull' | 'sideways' | 'bear' | 'panic' | 'neutral'
+        sl_multiplier: 止损宽度乘数 (牛1.5 / 震荡1.0 / 熊0.8 / 恐慌0.7)
         """
         if index_returns is None or len(index_returns) < 20:
-            return 'sideways', 0.9, 0.4
+            return 'neutral', 1.0
 
         ret_20d = np.mean(index_returns[-20:])
         ret_5d = np.mean(index_returns[-5:])
+        ret_60d = np.mean(index_returns[-60:]) if len(index_returns) >= 60 else ret_20d
         vol_20d = np.std(index_returns[-20:])
         vol_60d = np.std(index_returns[-60:]) if len(index_returns) >= 60 else vol_20d
-
-        # 波动率变化率
         vol_change = vol_20d / (vol_60d + 1e-8)
 
-        # 预测收益的均值和离散度
         pred_mean = np.mean(predicted_returns) if len(predicted_returns) > 0 else 0
+        pred_std = np.std(predicted_returns) if len(predicted_returns) > 0 else 0.02
         pred_pos_ratio = np.mean(predicted_returns > 0) if len(predicted_returns) > 0 else 0.5
+        pred_sharpe = pred_mean / (pred_std + 1e-8)
 
-        # --- 恐慌 (Panic): 极端下跌 + 波动率飙升 → 重仓抄底 ---
+        # 趋势信号
+        trend_5d = np.clip(ret_5d / 0.03, -1, 1)
+        trend_20d = np.clip(ret_20d / 0.05, -1, 1)
+        trend_60d = np.clip(ret_60d / 0.08, -1, 1)
+        trend_score = 0.3 * trend_5d + 0.4 * trend_20d + 0.3 * trend_60d
+
+        # 波动率
+        vol_penalty = np.clip(vol_change - 0.8, 0, 1) * 0.3 + np.clip(vol_20d / 0.025 - 0.5, 0, 1) * 0.3
+        vol_score = 1.0 - np.clip(vol_penalty, 0, 0.6)
+
+        # 预测质量
+        pred_score = np.clip(pred_sharpe / 2.0 + 0.5, 0.2, 1.0)
+        pred_score *= (0.5 + 0.5 * pred_pos_ratio)
+
+        # 市场状态识别
         if ret_5d < -0.03 and vol_change > 1.5:
-            print(f"[市场状态] 恐慌 (5日跌{ret_5d:.1%}, 波动率飙升{vol_change:.1f}x) → 重仓抄底")
-            return 'panic', 0.98, 0.85   # 满仓，高度集中博弈反弹
-
-        # --- 熊市 (Bear): 下跌趋势 + 高波动 → 精选逆势股，保持高仓位 ---
-        if ret_20d < -0.01 and vol_change > 1.2:
-            print(f"[市场状态] 熊市 (20日跌{ret_20d:.1%}, 波动率{vol_20d:.3f}) → 精选逆势股")
-            # 熊市也要保持高仓位，目标是找到逆势上涨的个股
-            return 'bear', 0.88, 0.75
-
-        # --- 震荡 (Sideways): 横盘/低波动 → 精选个股，保持仓位 ---
-        if abs(ret_20d) < 0.005 and vol_change < 1.3:
-            print(f"[市场状态] 震荡 (20日波动{ret_20d:.1%}) → 精选个股")
-            return 'sideways', 0.85, 0.5
-
-        # --- 牛市 (Bull): 上涨趋势 + 正常波动 → 满仓分散 ---
-        if ret_20d > 0.005:
-            print(f"[市场状态] 牛市 (20日涨{ret_20d:.1%}) → 积极布局")
-            return 'bull', 0.98, 0.2
-
-        # --- 默认：保持高仓位 ---
-        print(f"[市场状态] 中性 (20日{ret_20d:.1%}) → 标准配置")
-        return 'sideways', 0.9, 0.4
-
-
-class BlackLittermanOptimizer:
-    """动态决策组合优化器 - 无权重上限，根据市场状态自适应"""
-
-    def __init__(self, risk_aversion=RISK_AVERSION,
-                 max_industry_weight=MAX_INDUSTRY_WEIGHT,
-                 max_vol_ratio=MAX_VOLATILITY_RATIO):
-        self.risk_aversion = risk_aversion
-        self.max_industry_weight = max_industry_weight
-        self.max_vol_ratio = max_vol_ratio
-
-    def optimize_portfolio(self, predicted_returns, predicted_stds,
-                          market_caps, historical_returns, industry_ids=None,
-                          index_returns=None):
-        """
-        动态决策组合优化
-        - 无单只股票权重上限
-        - 无持仓数量限制
-        - 根据市场状态自适应调整总仓位和集中度
-        - 总权重 <= 1.0 (剩余为闲置本金)
-        """
-        n_assets = len(predicted_returns)
-        if n_assets == 0:
-            return np.array([]), {}
-
-        # === 第1步：检测市场状态 ===
-        regime_info = MarketRegime.detect(index_returns, None, predicted_returns)
-        regime, target_exposure, concentration = regime_info
-
-        # === 第2步：协方差估计 ===
-        if historical_returns is not None and historical_returns.shape[0] > 60:
-            cov_matrix = self._ledoit_wolf_shrinkage(historical_returns)
+            regime = 'panic'
+        elif ret_20d < -0.01 and vol_change > 1.2:
+            regime = 'bear'
+        elif ret_20d > 0.01:
+            regime = 'bull'
+        elif abs(ret_20d) < 0.003:
+            regime = 'sideways'
         else:
-            cov_matrix = np.diag(np.maximum(predicted_stds, 0.001) ** 2)
+            regime = 'neutral'
 
-        # === 第3步：Black-Litterman后验收益 ===
-        mkt_weights = market_caps / (market_caps.sum() + 1e-10)
-        mkt_vol = np.sqrt(mkt_weights @ cov_matrix @ mkt_weights + 1e-10)
-        equilibrium_returns = self.risk_aversion * cov_matrix @ mkt_weights
+        # 止损宽度乘数
+        sl_map = {'bull': 1.5, 'sideways': 1.0, 'neutral': 1.0, 'bear': 0.8, 'panic': 0.7}
+        sl_multiplier = sl_map.get(regime, 1.0)
 
-        tau = 0.05
-        P = np.eye(n_assets)
-        Q = predicted_returns
-        omega = np.diag(np.maximum(predicted_stds, 0.001) ** 2 + tau * np.diag(cov_matrix))
+        print(f"[市场状态] {regime} | 趋势分={trend_score:.2f} 波动分={vol_score:.2f} 预测分={pred_score:.2f}")
+        print(f"  止损乘数={sl_multiplier:.1f}x  Sharpe={pred_sharpe:.2f}  正向率={pred_pos_ratio:.1%}")
 
-        try:
-            prior_cov_inv = np.linalg.inv(tau * cov_matrix)
-            omega_inv = np.linalg.inv(omega)
-            posterior_cov = np.linalg.inv(prior_cov_inv + P.T @ omega_inv @ P)
-            posterior_returns = posterior_cov @ (prior_cov_inv @ equilibrium_returns + P.T @ omega_inv @ Q)
-        except np.linalg.LinAlgError:
-            posterior_returns = 0.5 * equilibrium_returns + 0.5 * Q
-
-        # === 第4步：根据市场状态确定选股策略 ===
-        valid = np.isfinite(posterior_returns)
-        if not valid.any():
-            return np.zeros(n_assets), {'regime': regime, 'exposure': 0, 'n_stocks': 0}
-
-        sorted_idx = np.argsort(posterior_returns)[::-1]
-
-        # 根据市场状态决定持仓策略（始终高仓位，最多选5只股票）
-        if regime == 'panic':
-            # 恐慌：集中2-4只最被低估的股票，满仓博弈反弹
-            n_picks = max(2, min(4, int(n_assets * 0.02)))
-            positive = sorted_idx[posterior_returns[sorted_idx] > 0]
-            top_idx = positive[:n_picks] if len(positive) >= 2 else sorted_idx[:n_picks]
-            weights = np.zeros(n_assets)
-            pos_rets = np.maximum(posterior_returns[top_idx], 1e-6)
-            weights[top_idx] = pos_rets / pos_rets.sum() * target_exposure
-
-        elif regime == 'bear':
-            # 熊市：精选2-4只逆势股，保持高仓位
-            n_picks = max(2, min(4, int(n_assets * 0.02)))
-            positive = sorted_idx[posterior_returns[sorted_idx] > 0]
-            top_idx = positive[:n_picks] if len(positive) >= 2 else sorted_idx[:n_picks]
-            weights = np.zeros(n_assets)
-            pos_rets = np.maximum(posterior_returns[top_idx], 1e-6)
-            weights[top_idx] = pos_rets / pos_rets.sum() * target_exposure
-
-        elif regime == 'bull':
-            # 牛市：分散布局3-5只，满仓
-            n_picks = max(3, min(5, int(n_assets * 0.05)))
-            positive = sorted_idx[posterior_returns[sorted_idx] > 0]
-            if len(positive) >= 3:
-                top_idx = positive[:n_picks]
-            else:
-                top_idx = sorted_idx[:max(3, n_picks)]
-            weights = np.zeros(n_assets)
-            pos_rets = np.maximum(posterior_returns[top_idx], 1e-6)
-            weights[top_idx] = pos_rets / pos_rets.sum() * target_exposure
-
-        else:  # sideways / default
-            # 震荡：精选3-5只，保持高仓位
-            n_picks = max(3, min(5, int(n_assets * 0.03)))
-            positive = sorted_idx[posterior_returns[sorted_idx] > 0]
-            if len(positive) >= 2:
-                top_idx = positive[:n_picks]
-            else:
-                top_idx = sorted_idx[:max(3, n_picks)]
-            weights = np.zeros(n_assets)
-            pos_rets = np.maximum(posterior_returns[top_idx], 1e-6)
-            weights[top_idx] = pos_rets / pos_rets.sum() * target_exposure
-
-        # === 第5步：行业约束（软约束，超出时调整） ===
-        if industry_ids is not None:
-            for ind in set(industry_ids):
-                mask = np.array([i == ind for i in industry_ids])
-                ind_weight = weights[mask].sum()
-                if ind_weight > self.max_industry_weight:
-                    weights[mask] *= self.max_industry_weight / (ind_weight + 1e-10)
-
-        # === 第6步：归一化到目标仓位（始终满仓，不闲置资金） ===
-        total = weights.sum()
-        if total > 0:
-            weights *= target_exposure / total
-        # 确保单只权重不超过1
-        weights = np.minimum(weights, 1.0)
-
-        # 统计信息
-        held_stocks = int(np.sum(weights > 0.001))
-        held_stock_ids = np.where(weights > 0.001)[0]
-        info = {
-            'regime': regime,
-            'target_exposure': target_exposure,
-            'actual_exposure': float(weights.sum()),
-            'n_stocks': held_stocks,
-            'concentration': concentration,
-        }
-
-        return weights, info
-
-    def _ledoit_wolf_shrinkage(self, returns):
-        """Ledoit-Wolf收缩协方差估计"""
-        n_samples, n_assets = returns.shape
-        sample_cov = np.cov(returns, rowvar=False)
-        stds = np.sqrt(np.diag(sample_cov))
-        mean_corr = (np.corrcoef(returns, rowvar=False) - np.eye(n_assets)).mean()
-        target = np.outer(stds, stds) * mean_corr
-        np.fill_diagonal(target, np.diag(sample_cov))
-        delta_sq = ((sample_cov - target) ** 2).sum() / n_assets**2
-        pi_mat = np.zeros((n_assets, n_assets))
-        for i in range(n_samples):
-            ret_i = returns[i].reshape(-1, 1)
-            diff = ret_i @ ret_i.T - sample_cov
-            pi_mat += diff ** 2
-        pi = pi_mat.sum() / (n_samples**2)
-        shrinkage = np.clip(pi / (pi + delta_sq + 1e-10), 0, 1)
-        return shrinkage * target + (1 - shrinkage) * sample_cov
+        return regime, sl_multiplier
 
 
 class StackingPredictor:
@@ -629,21 +496,22 @@ def load_test_data():
     return None
 
 
-def generate_result_csv(predictions, output_path=None):
-    """生成 result.csv"""
+def generate_result_csv(final_predictions, output_path=None):
+    """从ReviewLayer的final_predictions生成result.csv"""
     if output_path is None:
         output_path = os.path.join(OUTPUT_DIR, 'result.csv')
 
-    # 确保stock_id格式正确（6位数字）
-    predictions['stock_id'] = predictions['stock_id'].astype(str).str.zfill(6)
+    if not final_predictions:
+        print("无有效预测结果")
+        return
 
-    # 只保留有权重的股票，且最多不超过5只
-    result = predictions[predictions['weight'] > 0.001].copy()
+    result = pd.DataFrame(final_predictions)
+    result['stock_id'] = result['stock_id'].astype(str).str.zfill(6)
     result = result.sort_values('weight', ascending=False)
     result = result.head(5)
     result[['stock_id', 'weight']].to_csv(output_path, index=False, encoding='utf-8')
 
-    # 赛事总收益公式: R = Σ(w_i × r_i)，其中 r_i = (P_{T+5}^close / P_{T+1}^open) - 1
+    # 赛事总收益公式: R = Σ(w_i × r_i)，其中 r_i = (P_{T+5}^open / P_{T+1}^open) - 1
     total_predicted_return = (result['weight'] * result['predicted_return']).sum()
 
     print(f"\n结果已保存到 {output_path}")
@@ -658,26 +526,25 @@ def generate_result_csv(predictions, output_path=None):
 def main():
     set_all_seeds()
     print("=" * 60)
-    print("股价预测模型 - 预测主程序")
+    print("量化交易预测 - 信号→Gate→执行→风控→复盘")
     print(f"开始时间: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
     print("=" * 60)
 
-    # 加载模型
+    # ── 1. 加载模型 ──
     predictor = StackingPredictor()
     if not predictor.load_models():
-        print("警告: 模型文件不存在，生成默认预测")
-        predictions = pd.DataFrame({
-            'stock_id': ['000001', '000002', '600000', '600001', '600016'],
-            'predicted_return': [0.05, 0.04, 0.03, 0.02, 0.01],
-            'weight': [0.3, 0.25, 0.25, 0.15, 0.05],
-            'predicted_std': [0.01, 0.01, 0.01, 0.01, 0.01],
-            'market_cap': [500, 400, 600, 300, 450],
-            'industry': ['银行', '房地产', '银行', '非银金融', '银行']
-        })
+        print("警告: 模型文件不存在，使用默认预测")
+        predictions = [
+            {'stock_id': '000001', 'predicted_return': 0.05, 'weight': 0.30},
+            {'stock_id': '000002', 'predicted_return': 0.04, 'weight': 0.25},
+            {'stock_id': '600000', 'predicted_return': 0.03, 'weight': 0.20},
+            {'stock_id': '600016', 'predicted_return': 0.02, 'weight': 0.15},
+            {'stock_id': '601318', 'predicted_return': 0.01, 'weight': 0.10},
+        ]
         generate_result_csv(predictions)
         return True
 
-    # 加载数据
+    # ── 2. 加载数据 ──
     df = load_test_data()
     if df is None or len(df) == 0:
         print("无测试数据！")
@@ -685,7 +552,7 @@ def main():
 
     print(f"测试数据: {len(df)} 条记录, {df['stock_id'].nunique()} 只股票")
 
-    # 宏观和行业数据（优先AKShare真实数据，回退模拟数据，与训练时一致）
+    # 宏观和行业数据
     from data_fetcher import (generate_macro_data, generate_industry_data,
                               download_akshare_macro_data)
     macro_df = download_akshare_macro_data()
@@ -693,127 +560,108 @@ def main():
         macro_df = generate_macro_data()
     industry_df = generate_industry_data()
 
-    # 特征工程
+    # ── 3. 初始化各层 ──
     fe = FeatureEngineering()
-    stock_ids = sorted(df['stock_id'].unique())
+    stock_ids = sorted(df['stock_id'].astype(str).str.zfill(6).unique())
 
-    all_preds = []
-    for stock_id in stock_ids:
-        stock_df = df[df['stock_id'] == stock_id].copy()
-        stock_df = stock_df.sort_values('date').set_index('date')
-
-        if len(stock_df) < SEQ_LEN:
-            continue
-
-        features = fe.build_all_features(stock_df, industry_df, macro_df)
-        features = fe.remove_outliers(features)
-
-        # 使用最后N天数据 + 波动率聚类特征
-        last_features = features.iloc[-SEQ_LEN:].fillna(0)
-        X_raw = last_features.values
-        # 计算波动率聚类并追加为特征
-        cluster_id = compute_volatility_cluster(stock_df['close']) if 'close' in stock_df.columns else 1
-        cluster_col = np.full((len(X_raw), 1), cluster_id, dtype=np.float32)
-        X = np.column_stack([X_raw, cluster_col])
-
-        # 计算历史协方差所需的历史收益率
-        if 'close' in stock_df.columns:
-            hist_returns = stock_df['close'].pct_change().dropna().values[-252:]
-        else:
-            hist_returns = None
-
-        pred_return, pred_std = predictor.predict(X)
-
-        # 市值 = 最新收盘价 × 最新成交量 / 换手率（近似）
-        latest = stock_df.iloc[-1]
-        close_price = latest.get('close', 10)
-        volume = latest.get('volume', 1e7)
-        turnover = latest.get('turnover_rate', 1)
-        if turnover and turnover > 0:
-            est_market_cap = close_price * volume / (turnover / 100)
-        else:
-            est_market_cap = close_price * 1e9  # 粗略估算
-
-        industry = get_industry(stock_id)
-
-        all_preds.append({
-            'stock_id': stock_id,
-            'predicted_return': float(pred_return),
-            'predicted_std': float(pred_std),
-            'market_cap': float(est_market_cap),
-            'industry': industry,
-        })
-
-    predictions_df = pd.DataFrame(all_preds)
-
-    if len(predictions_df) == 0:
-        print("没有有效预测结果")
-        return False
-
-    # 准备历史收益率矩阵 (用于协方差估计)
-    # 收集各股票的历史日收益率
-    hist_returns_dict = {}
-    for stock_id in predictions_df['stock_id']:
-        stock_df = df[df['stock_id'] == stock_id].copy()
-        stock_df = stock_df.sort_values('date')
-        if 'close' in stock_df.columns:
-            rets = stock_df['close'].pct_change().dropna().values[-252:]
-            if len(rets) > 60:
-                hist_returns_dict[stock_id] = rets
-
-    # 对齐历史收益率
-    if len(hist_returns_dict) >= 3:
-        min_len = min(len(v) for v in hist_returns_dict.values())
-        hist_matrix = np.column_stack([v[-min_len:] for v in hist_returns_dict.values()])
-    else:
-        hist_matrix = None
-
-    # 计算市场指数收益率 (用于市场状态检测)
+    # 市场指数收益率
     index_returns = None
-    index_csv = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), 'data', 'index_data.csv')
+    index_csv = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
+                             'data', 'index_data.csv')
     if os.path.exists(index_csv):
         idx_df = pd.read_csv(index_csv)
         idx_df['date'] = pd.to_datetime(idx_df['date'])
         idx_df = idx_df.sort_values('date')
         if 'index_close' in idx_df.columns:
             index_returns = idx_df['index_close'].pct_change().dropna().values[-252:]
-    if index_returns is None:
-        # 从stock数据估算等权市场收益
-        all_rets = []
-        for stock_id in predictions_df['stock_id'][:30]:
-            stock_df = df[df['stock_id'] == stock_id].copy()
-            stock_df = stock_df.sort_values('date')
-            if 'close' in stock_df.columns:
-                rets = stock_df['close'].pct_change().dropna().values[-252:]
-                if len(rets) > 60:
-                    all_rets.append(rets)
-        if all_rets:
-            min_len = min(len(r) for r in all_rets)
-            index_returns = np.mean([r[-min_len:] for r in all_rets], axis=0)
 
-    # Black-Litterman 优化
-    optimizer = BlackLittermanOptimizer()
-    weights, opt_info = optimizer.optimize_portfolio(
-        predictions_df['predicted_return'].values,
-        predictions_df['predicted_std'].values,
-        predictions_df['market_cap'].values,
-        hist_matrix,
-        predictions_df['industry'].values,
-        index_returns=index_returns
+    signal_gen = SignalGenerator(predictor, fe, industry_df, macro_df,
+                                 seq_len=SEQ_LEN, sl_atr_multiplier=SL_ATR_MULTIPLIER)
+    gate = LiveGate(
+        whitelist_stocks=None,  # 不设白名单，全市场选股
+        max_single_position=0.30,
+        min_risk_distance_pct=0.02,
+        min_confidence=0.10,
+        max_positions=5,
     )
+    risk_mgr = RiskManager(
+        total_capital=1.0,
+        max_loss_per_position=MAX_LOSS_PER_POSITION,
+        max_total_exposure=MAX_TOTAL_EXPOSURE,
+        single_stock_only=True,
+    )
+    executor = ExecutionSimulator(risk_mgr, default_slippage_bps=5.0)
+    review = ReviewLayer(output_dir=OUTPUT_DIR)
 
-    print(f"\n[组合决策] 市场状态: {opt_info.get('regime', 'N/A')}, "
-          f"目标仓位: {opt_info.get('target_exposure', 0):.0%}, "
-          f"实际仓位: {opt_info.get('actual_exposure', 0):.0%}, "
-          f"持仓数: {opt_info.get('n_stocks', 0)}")
+    # ── 4. 生成信号 ──
+    print("\n生成交易信号...")
+    signals = signal_gen.generate_all(df, stock_ids)
+    print(f"生成 {len(signals)} 个信号")
 
-    predictions_df['weight'] = weights
-    predictions_df = predictions_df.sort_values('weight', ascending=False)
+    if not signals:
+        print("无有效信号")
+        return False
 
-    generate_result_csv(predictions_df)
+    # ── 5. 市场状态 → 调整止损宽度 ──
+    pred_returns = np.array([s.predicted_return for s in signals])
+    regime, sl_multiplier = MarketRegime.detect(index_returns, pred_returns)
+
+    # 应用市场状态到止损宽度
+    for s in signals:
+        entry = s.entry_price
+        base_sl_dist = entry - s.stop_loss_price
+        adjusted_sl = entry - base_sl_dist * sl_multiplier
+        s.stop_loss_price = float(max(adjusted_sl, entry * 0.90))  # 硬止损不超过-10%
+
+    # 按预测收益降序排列（优先处理高收益信号）
+    signals.sort(key=lambda s: s.predicted_return, reverse=True)
+
+    # ── 6. 流水线: Gate → Risk → Execute → Review ──
+    print("\n执行流水线...")
+    for signal in signals:
+        # Gate 校验
+        passed, reason = gate.validate(signal)
+        if not passed:
+            review.log_rejection(signal, reason)
+            continue
+
+        # 以损定仓
+        position_size = risk_mgr.compute_position_size(signal)
+        if position_size <= 0.001:
+            review.log_rejection(signal, f"position_too_small:{position_size:.4f}")
+            continue
+
+        # 执行（模拟）
+        exec_record = executor.execute_signal(signal, position_size)
+        if exec_record is None:
+            continue
+
+        # 登记到Gate（单只股票唯一持仓）
+        gate.register_position(signal.stock_id, {
+            'stock_id': signal.stock_id,
+            'weight': position_size,
+            'entry_price': exec_record.entry_price,
+            'date': signal.date,
+        })
+
+        # 复盘记录
+        review.log_execution(exec_record)
+        review.log_slippage(signal.stock_id, signal.entry_price, exec_record.entry_price)
+        review.log_prediction(signal.stock_id, signal.predicted_return, position_size)
+
+    # ── 7. 风控事件记录 ──
+    for event in risk_mgr.risk_events:
+        review.log_risk_event(event)
+
+    # ── 8. 生成报告和结果 ──
+    report = review.generate_report()
+    generate_result_csv(review.final_predictions)
 
     print("=" * 60)
-    print("预测完成!")
+    print("流水线执行完成!")
+    print(f"  Gate拒绝: {len(review.rejections)}")
+    print(f"  执行成交: {len(review.executions)}")
+    print(f"  风险事件: {len(review.risk_events)}")
     print("=" * 60)
 
     return True

@@ -478,8 +478,12 @@ def _get_local_latest_date(csv_path):
         return None
 
 
-def load_all_data(data_dir=None, force_refresh=True):
-    """加载并融合所有数据源（智能刷新：仅当baostock有新数据时才重新下载）"""
+def load_all_data(data_dir=None, force_refresh=True, exclude_last_trading_days=0):
+    """加载并融合所有数据源（智能刷新：仅当baostock有新数据时才重新下载）
+
+    参数:
+        exclude_last_trading_days: 排除最近N个交易日的数据（用于训练时留出最新数据做预测）
+    """
     if data_dir is None:
         data_dir = os.path.join(os.path.dirname(__file__), '..', 'data')
 
@@ -549,6 +553,15 @@ def load_all_data(data_dir=None, force_refresh=True):
         stock_df = preprocess_stock_data(stock_df)
         stock_df = add_index_features(stock_df, index_df)
         stock_df = add_event_features(stock_df)
+
+    # 排除最近N个交易日（用于训练时留出最新数据做预测）
+    if exclude_last_trading_days > 0 and stock_df is not None and len(stock_df) > 0:
+        all_dates = sorted(stock_df['date'].unique())
+        if len(all_dates) > exclude_last_trading_days:
+            excluded_dates = set(all_dates[-exclude_last_trading_days:])
+            stock_df = stock_df[~stock_df['date'].isin(excluded_dates)]
+            print(f"已排除最近 {exclude_last_trading_days} 个交易日: {sorted(excluded_dates)}")
+            print(f"排除后剩余 {len(stock_df)} 条记录，{stock_df['stock_id'].nunique()} 只股票")
 
     return stock_df, industry_df, macro_df
 

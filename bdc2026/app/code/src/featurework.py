@@ -47,7 +47,7 @@ class FeatureEngineering:
 
         # 振幅/波动
         features['amplitude'] = (high - low) / (close + 1e-8)
-        features['turnover_rate'] = df['turnover_rate'] if 'turnover_rate' in df.columns else 0
+        features['turnover_rate'] = df['turnover_rate'].copy() if 'turnover_rate' in df.columns else pd.Series(0.0, index=df.index)
         features['log_amount'] = np.log1p(amount)
         features['volume_change'] = volume.pct_change()
         features['high_low_ratio'] = high / (low + 1e-8)
@@ -73,15 +73,8 @@ class FeatureEngineering:
         features['amount_ma_ratio_20'] = amount / (amt_ma20 + 1e-8)
         features['amount_ma_ratio_60'] = amount / (amt_ma60 + 1e-8)
 
-        # 动量
-        features['price_momentum_5'] = close / (close.shift(5) + 1e-8) - 1
-        features['price_momentum_10'] = close / (close.shift(10) + 1e-8) - 1
-        features['price_momentum_20'] = close / (close.shift(20) + 1e-8) - 1
-
-        # 非线性交互
-        features['price_volume_interaction'] = close * volume
+        # 量价交叉特征
         features['return_volume_interaction'] = features['daily_return'] * volume
-        features['amplitude_volume_interaction'] = features['amplitude'] * volume
 
         return features
 
@@ -119,7 +112,6 @@ class FeatureEngineering:
         signal = macd.ewm(span=9, adjust=False).mean()
         features['macd'] = macd
         features['macd_signal'] = signal
-        features['macd_hist'] = macd - signal
 
         # RSI
         delta = close.diff()
@@ -181,53 +173,51 @@ class FeatureEngineering:
         features['dmi_plus'] = 100 * plus_dm.rolling(14).mean() / (atr14 + 1e-8)
         features['dmi_minus'] = 100 * minus_dm.rolling(14).mean() / (atr14 + 1e-8)
 
-        # BIAS
-        features['bias_5'] = (close - ma_5) / (ma_5 + 1e-8) * 100
-        features['bias_10'] = (close - ma_10) / (ma_10 + 1e-8) * 100
-        features['bias_20'] = (close - ma_20) / (ma_20 + 1e-8) * 100
-
         return features
 
-    def calculate_money_flow_features(self, df):
-        """资金流特征（17个）"""
+    def calculate_alpha_factors(self, df):
+        """真实Alpha因子（替换假资金流特征）"""
         features = pd.DataFrame(index=df.index)
 
-        amount = df['amount']
-        volume = df['volume']
         close = df['close']
+        open_p = df['open']
+        high = df['high']
+        low = df['low']
+        volume = df['volume']
+        amount = df['amount']
+        daily_ret = close.pct_change()
 
-        # 用日内价格位置估算买卖压力 (Close Location Value)
-        high, low = df['high'], df['low']
-        clv = ((close - low) - (high - close)) / (high - low + 1e-8)  # -1到1
-        features['money_flow'] = clv * amount  # Chaikin Money Flow概念
+        # === 1. Chaikin资金流 (保留真实CLV) ===
+        clv = ((close - low) - (high - close)) / (high - low + 1e-8)
+        features['money_flow'] = clv * amount
 
-        # 大/中/小单拆分（基于每日价格行为的合理代理）
-        features['big_flow'] = features['money_flow'] * 0.5
-        features['medium_flow'] = features['money_flow'] * 0.3
-        features['small_flow'] = features['money_flow'] * 0.2
+        # === 2. VWAP偏离 (日内估值偏离) ===
+        features['vwap_deviation'] = close / (amount / (volume + 1e-8) + 1e-8) - 1
 
-        features['big_flow_ratio'] = features['big_flow'] / (amount + 1e-8)
-        features['medium_flow_ratio'] = features['medium_flow'] / (amount + 1e-8)
-        features['small_flow_ratio'] = features['small_flow'] / (amount + 1e-8)
+        # === 3. Amihud非流动性 (价格冲击成本) ===
+        features['illiquidity'] = np.abs(daily_ret) / (amount + 1e-8) * 1e8
 
-        # 资金流趋势（滚动对比）
-        bf = features['big_flow']
-        features['flow_trend_short'] = bf.rolling(5).mean() / (bf.rolling(20).mean() + 1e-8)
-        features['flow_trend_long'] = bf.rolling(10).mean() / (bf.rolling(60).mean() + 1e-8)
+        # === 4. MAX效应 (Bali et al.): 20日最大日收益 ===
+        features['max_ret_20d'] = daily_ret.rolling(20).max()
 
-        # 资金流Z-score
-        bf_mean = bf.rolling(20).mean()
-        bf_std = bf.rolling(20).std()
-        features['flow_zscore'] = (bf - bf_mean) / (bf_std + 1e-8)
+        # === 5. 隔夜缺口 vs 日内收益 ===
+        features['overnight_gap'] = (open_p - close.shift(1)) / (close.shift(1) + 1e-8)
+        features['intraday_ret'] = (close - open_p) / (open_p + 1e-8)
 
-        # 资金流与价格相关性
-        price_change = close.pct_change()
-        features['flow_return_corr'] = price_change.rolling(20).corr(bf / (volume + 1))
+        # === 6. VPT量价趋势 ===
+        features['vpt'] = ((close - close.shift(1)) / (close.shift(1) + 1e-8) * volume).cumsum()
 
-        # 资金流移动平均
-        for w in [5, 10, 20]:
-            features[f'flow_ma_{w}'] = bf.rolling(w).mean()
-            features[f'flow_ma_ratio_{w}'] = bf / (features[f'flow_ma_{w}'] + 1e-8)
+        # === 7. EOM (Ease of Movement) ===
+        half_range = (high + low) / 2
+        box_ratio = amount / (volume * (high - low + 1e-8) + 1e-8)
+        features['eom_14'] = (half_range - half_range.shift(1)) / (box_ratio + 1e-8)
+
+        # === 8. 量价背离: 价涨量缩 = 弱信号 ===
+        vol_ma20 = volume.rolling(20).mean()
+        features['volume_price_divergence'] = daily_ret / (volume / (vol_ma20 + 1e-8) + 1e-8)
+
+        # === 9. 日内振幅-量比 (波动效率) ===
+        features['range_volume_ratio'] = (high - low) / (close * volume + 1e-8) * 1e8
 
         return features
 
@@ -274,8 +264,21 @@ class FeatureEngineering:
 
         # 相对行业/市场
         features['return_vs_industry'] = close.pct_change() - features['industry_return']
-        features['industry_pe_percentile'] = features['industry_pe']
-        features['industry_pb_percentile'] = features['industry_pb']
+        # 行业PE/PB分位数 (当前值 vs 行业历史滚动区间)
+        if 'industry_pe' in features.columns and features['industry_pe'].nunique() > 1:
+            ind_pe = features['industry_pe']
+            ind_pe_min = ind_pe.rolling(60, min_periods=10).min()
+            ind_pe_max = ind_pe.rolling(60, min_periods=10).max()
+            features['industry_pe_percentile'] = (ind_pe - ind_pe_min) / (ind_pe_max - ind_pe_min + 1e-8)
+        else:
+            features['industry_pe_percentile'] = 0.5
+        if 'industry_pb' in features.columns and features['industry_pb'].nunique() > 1:
+            ind_pb = features['industry_pb']
+            ind_pb_min = ind_pb.rolling(60, min_periods=10).min()
+            ind_pb_max = ind_pb.rolling(60, min_periods=10).max()
+            features['industry_pb_percentile'] = (ind_pb - ind_pb_min) / (ind_pb_max - ind_pb_min + 1e-8)
+        else:
+            features['industry_pb_percentile'] = 0.5
 
         # 宏观特征（兼容AKShare真实数据和模拟数据，确保列数固定）
         # 所有可能的宏观源列（AKShare + 模拟数据全集），缺失列填0保证维度一致
@@ -348,9 +351,7 @@ class FeatureEngineering:
             std_ret = returns.rolling(window).std()
             features[f'sharp_ratio_{window}'] = mean_ret / (std_ret + 1e-8) * np.sqrt(252)
 
-        # 动量和反转
-        features['momentum_20_60'] = close / (close.shift(60) + 1e-8) - close / (close.shift(20) + 1e-8)
-        features['reversal_5_20'] = close / (close.shift(20) + 1e-8) - close / (close.shift(5) + 1e-8)
+        # 波动率变化
         features['volatility_change'] = returns.rolling(20).std() / (returns.rolling(60).std() + 1e-8)
 
         return features
@@ -372,8 +373,6 @@ class FeatureEngineering:
         features['pb_percentile'] = (pb - pb_rolling_min) / (pb_rolling_max - pb_rolling_min + 1e-8)
 
         features['peg'] = pe / (close.pct_change(252) * 100 + 1e-8)
-        features['ps_ratio'] = close / (df.get('revenue_per_share', pd.Series(1, index=df.index)) + 1e-8)
-        features['pcf_ratio'] = close / (df.get('cashflow_per_share', pd.Series(1, index=df.index)) + 1e-8)
 
         return features
 
@@ -390,9 +389,8 @@ class FeatureEngineering:
         return features
 
     def calculate_event_features(self, df):
-        """事件特征（2个）"""
+        """事件特征"""
         features = pd.DataFrame(index=df.index)
-        features['index_adjustment'] = df.get('is_in_index', pd.Series(1, index=df.index))
         features['earnings_season'] = df.get('earnings_season', pd.Series(0, index=df.index))
         return features
 
@@ -403,7 +401,7 @@ class FeatureEngineering:
         all_components = [
             self.calculate_basic_features(stock_df),
             self.calculate_technical_indicators(stock_df),
-            self.calculate_money_flow_features(stock_df),
+            self.calculate_alpha_factors(stock_df),
             self.calculate_industry_macro_features(stock_df, industry_df, macro_df),
             self.calculate_time_series_features(stock_df),
             self.calculate_valuation_features(stock_df),
@@ -488,7 +486,7 @@ def generate_features_for_stocks(stock_data_dict, industry_data=None, macro_data
 
         close = df['close']
         open_p = df['open']
-        target = close.shift(-5) / (open_p.shift(-1) + 1e-8) - 1
+        target = open_p.shift(-5) / (open_p.shift(-1) + 1e-8) - 1
 
         all_stock_features[stock_id] = features
         all_targets[stock_id] = target
