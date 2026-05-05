@@ -579,7 +579,7 @@ def main():
                                  seq_len=SEQ_LEN, sl_atr_multiplier=SL_ATR_MULTIPLIER)
     gate = LiveGate(
         whitelist_stocks=None,  # 不设白名单，全市场选股
-        max_single_position=0.30,
+        max_single_position=1.0,
         min_risk_distance_pct=0.02,
         min_confidence=0.10,
         max_positions=5,

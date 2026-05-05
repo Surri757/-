@@ -18,7 +18,7 @@ class LiveGate:
 
     def __init__(self,
                  whitelist_stocks: Optional[Set[str]] = None,
-                 max_single_position: float = 0.30,
+                 max_single_position: float = 1.0,
                  min_risk_distance_pct: float = 0.02,
                  min_confidence: float = 0.10,
                  max_positions: int = 5):
