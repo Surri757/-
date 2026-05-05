@@ -13,6 +13,7 @@ from datetime import datetime
 from concurrent.futures import ThreadPoolExecutor
 import multiprocessing
 import gc
+from tqdm import tqdm
 
 from sklearn.linear_model import Ridge
 from sklearn.preprocessing import StandardScaler
@@ -122,7 +123,6 @@ except Exception as e:
 sys.path.append(os.path.dirname(os.path.abspath(__file__)))
 from featurework import FeatureEngineering
 from data_fetcher import load_all_data
-from monitor import TrainingMonitor
 
 
 # ============================================================
@@ -504,7 +504,7 @@ class StackingEnsemble:
         else:
             logger.info("3模型方案: LightGBM + CatBoost + XGBoost (PyTorch不可用)")
 
-    def train_base_models(self, X_train, y_train, sample_weight=None, dates_train=None, monitor=None):
+    def train_base_models(self, X_train, y_train, sample_weight=None, dates_train=None):
         """训练所有基础模型（支持排序目标和样本权重）"""
         set_all_seeds()
         logger.info("开始训练基础模型...")
@@ -563,7 +563,8 @@ class StackingEnsemble:
 
         logger.info(f"并行训练 {len(ml_models)} 个ML模型...")
         with ThreadPoolExecutor(max_workers=min(len(ml_models), MAX_THREADS)) as ex:
-            results = list(ex.map(_train_ml, ml_models.items()))
+            results = list(tqdm(ex.map(_train_ml, ml_models.items()),
+                              total=len(ml_models), desc="GBDT训练", unit="model"))
         for name, model in results:
             self.base_models[name] = model
 
@@ -611,7 +612,8 @@ class StackingEnsemble:
                     best_val_ic = -float('inf')
                     patience_counter = 0
 
-                    for epoch in range(PT_EPOCHS):
+                    epoch_pbar = tqdm(range(PT_EPOCHS), desc=f"  {name}", leave=False, unit="ep")
+                    for epoch in epoch_pbar:
                         model.train()
                         train_loss = 0
                         for batch_data in train_loader:
@@ -665,14 +667,16 @@ class StackingEnsemble:
                             val_ic = np.corrcoef(val_preds_list, val_targets_list)[0, 1]
                             val_ic = val_ic if np.isfinite(val_ic) else 0.0
 
+                        epoch_pbar.set_postfix(
+                            train=f"{avg_train_loss:.4f}",
+                            val_loss=f"{avg_val_loss:.4f}",
+                            val_ic=f"{val_ic:.4f}",
+                            best_ic=f"{best_val_ic:.4f}"
+                        )
                         if (epoch + 1) % 5 == 0 or epoch == 0:
                             logger.info(f"  {name} Epoch {epoch+1}/{PT_EPOCHS}, "
                                        f"train={avg_train_loss:.4f}, val_loss={avg_val_loss:.4f}, "
                                        f"val_ic={val_ic:.4f}")
-
-                        # 记录到监控器
-                        if monitor is not None:
-                            monitor.log_pt_epoch(name, epoch + 1, avg_train_loss, avg_val_loss, val_ic)
 
                         # 以IC为主、Loss为辅的早停策略
                         is_better = (val_ic > best_val_ic + 0.001 or
@@ -709,7 +713,7 @@ class StackingEnsemble:
 
         logger.info("基础模型训练完成")
 
-    def generate_oof_predictions(self, X, y, n_folds=N_FOLDS, sample_weight=None, dates=None, monitor=None):
+    def generate_oof_predictions(self, X, y, n_folds=N_FOLDS, sample_weight=None, dates=None):
         """时间序列滚动交叉验证生成OOF预测（支持排序目标和样本权重）"""
         set_all_seeds()
         n_samples = len(X)
@@ -749,7 +753,7 @@ class StackingEnsemble:
 
         logger.info(f"时间序列滚动交叉验证 ({n_folds} 折)...")
         min_train = SEQ_LEN * 2  # 最小训练样本数
-        for fold_idx in range(n_folds):
+        for fold_idx in tqdm(range(n_folds), desc="CV Fold", unit="fold"):
             val_start = fold_idx * fold_size
             val_end = (fold_idx + 1) * fold_size if fold_idx < n_folds - 1 else n_samples
 
@@ -799,7 +803,7 @@ class StackingEnsemble:
                         best_loss = float('inf')
                         pat = 0
                         pt_cv_epochs = max(15, PT_EPOCHS // 3)  # CV中足够epoch保证质量
-                        for epoch in range(pt_cv_epochs):
+                        for epoch in tqdm(range(pt_cv_epochs), desc=f"    {name}", leave=False, unit="ep"):
                             model.train()
                             for batch_data in tr_loader:
                                 bx, by = batch_data[0], batch_data[1]
@@ -855,17 +859,6 @@ class StackingEnsemble:
                     logger.warning(f"  Fold {fold_idx+1} {name} 失败: {e}")
 
             oof_preds[val_idx, :] = fold_preds
-
-            # 记录CV折信息到监控器
-            if monitor is not None and len(val_idx) > 10:
-                model_ics = {}
-                y_fold = y[val_idx]
-                for mi, mname in enumerate(self.base_models.keys()):
-                    mask = fold_preds[:, mi] != 0
-                    if mask.sum() > 10:
-                        ic = np.corrcoef(y_fold[mask], fold_preds[mask, mi])[0, 1]
-                        model_ics[mname] = float(ic) if np.isfinite(ic) else 0.0
-                monitor.log_cv_fold(fold_idx + 1, len(train_idx), len(val_idx), model_ics)
 
             if torch_available and torch is not None and torch.cuda.is_available():
                 torch.cuda.empty_cache()
@@ -976,9 +969,6 @@ def main():
 
     start_time = datetime.now()
 
-    # 初始化监控器
-    monitor = TrainingMonitor()
-
     # 加载数据
     df, industry_df, macro_df = load_all_data(exclude_last_trading_days=120)
     logger.info(f"数据加载完成: {len(df)} 条记录, {df['stock_id'].nunique()} 只股票")
@@ -1016,7 +1006,8 @@ def main():
 
     # 并行处理股票特征
     with ThreadPoolExecutor(max_workers=MAX_THREADS) as ex:
-        results = list(ex.map(process_stock, stock_ids))
+        results = list(tqdm(ex.map(process_stock, stock_ids),
+                           total=len(stock_ids), desc="特征工程", unit="stock"))
 
     for res in results:
         if res[0] is not None:
@@ -1049,13 +1040,13 @@ def main():
     stacking = StackingEnsemble()
     stacking.scaler = scaler
     stacking.create_base_models()
-    stacking.train_base_models(X_scaled, y, sample_weight=sample_weight, dates_train=dates_all, monitor=monitor)
+    stacking.train_base_models(X_scaled, y, sample_weight=sample_weight, dates_train=dates_all)
 
     # OOF 交叉验证预测
     logger.info("生成OOF预测...")
     oof_preds = stacking.generate_oof_predictions(X_scaled, y,
                                                    sample_weight=sample_weight,
-                                                   dates=dates_all, monitor=monitor)
+                                                   dates=dates_all)
 
     # 训练元模型
     stacking.train_meta_model(oof_preds, y)
@@ -1069,31 +1060,12 @@ def main():
         mask = oof_preds[:, i] != 0
         if mask.sum() > 100:
             logger.info(f"\n{name}:")
-            metrics = evaluate_predictions(y[mask], oof_preds[mask, i], return_metrics=True)
-            monitor.log_base_metrics(name, metrics)
+            evaluate_predictions(y[mask], oof_preds[mask, i])
 
     # 元模型预测
     meta_preds = stacking.meta_model.predict(oof_preds)
     logger.info(f"\nStacking Ensemble:")
-    metrics = evaluate_predictions(y, meta_preds, return_metrics=True)
-    monitor.log_base_metrics('Stacking', metrics)
-
-    # 元模型权重记录
-    if stacking.meta_model is not None and hasattr(stacking.meta_model, 'weights'):
-        monitor.log_meta_weights(list(stacking.base_models.keys()),
-                                 stacking.meta_model.weights)
-
-    # LightGBM特征重要性
-    if 'lightgbm' in stacking.base_models:
-        try:
-            lgb_model = stacking.base_models['lightgbm']
-            fi = lgb_model.feature_importances_
-            if fi is not None and len(fi) > 0:
-                # 用占位特征名（实际使用时应从featurework获取）
-                feat_names = [f'feat_{j}' for j in range(len(fi))]
-                monitor.log_feature_importance(feat_names, fi)
-        except Exception:
-            pass
+    evaluate_predictions(y, meta_preds)
 
     # 早停统计
     if stacking.early_stop_counts:
@@ -1104,9 +1076,6 @@ def main():
     # 保存模型
     stacking.save_models()
 
-    # 生成可视化仪表盘
-    monitor.generate_dashboard()
-
     elapsed = (datetime.now() - start_time).total_seconds() / 3600
     logger.info("=" * 60)
     logger.info(f"训练完成! 总耗时: {elapsed:.2f} 小时")
@@ -1116,22 +1085,18 @@ def main():
 
 
 # 内联评估函数（避免循环import）
-def evaluate_predictions(y_true, y_pred, return_metrics=False):
+def evaluate_predictions(y_true, y_pred):
     y_true = np.asarray(y_true).flatten()
     y_pred = np.asarray(y_pred).flatten()
     mask = np.isfinite(y_true) & np.isfinite(y_pred)
     y_true, y_pred = y_true[mask], y_pred[mask]
     if len(y_true) < 10:
-        if return_metrics:
-            return {'MSE': 0, 'MAE': 0, 'R2': 0, 'IC': 0}
         return
     mse = np.mean((y_true - y_pred) ** 2)
     mae = np.mean(np.abs(y_true - y_pred))
     r2 = 1 - np.sum((y_true - y_pred) ** 2) / (np.sum((y_true - np.mean(y_true)) ** 2) + 1e-10)
     ic, _ = spearmanr(y_true, y_pred)
     logger.info(f"  MSE={mse:.6f}, MAE={mae:.6f}, R2={r2:.4f}, IC={ic:.4f}")
-    if return_metrics:
-        return {'MSE': float(mse), 'MAE': float(mae), 'R2': float(r2), 'IC': float(ic)}
 
 
 if __name__ == "__main__":
