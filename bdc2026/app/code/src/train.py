@@ -123,6 +123,8 @@ except Exception as e:
 sys.path.append(os.path.dirname(os.path.abspath(__file__)))
 from featurework import FeatureEngineering
 from data_fetcher import load_all_data
+from tft_model import TFTModel
+from spectral_m import SpectralMEnsemble
 
 
 # ============================================================
@@ -494,13 +496,17 @@ class StackingEnsemble:
                 seq_len=SEQ_LEN, n_features=n_feat, d_model=D_MODEL,
                 n_heads=N_HEADS, e_layers=E_LAYERS
             )
-            self.base_models['timesnet'] = TimesNetModel(
-                seq_len=SEQ_LEN, n_features=n_feat, d_model=D_MODEL, e_layers=2
+            self.base_models['spectralm'] = SpectralMEnsemble(
+                hoat_window=60, vme_window=60, n_states=5
             )
             self.base_models['dlinear'] = DLinearModel(
                 seq_len=SEQ_LEN, n_features=n_feat
             )
-            logger.info("6模型方案: LightGBM + CatBoost + XGBoost + PatchTST + TimesNet + DLinear")
+            self.base_models['tft'] = TFTModel(
+                seq_len=SEQ_LEN, n_features=n_feat, d_model=D_MODEL,
+                n_heads=4, lstm_hidden=64, dropout=0.1
+            )
+            logger.info("7模型方案: LightGBM + CatBoost + XGBoost + SpectralM + PatchTST + DLinear + TFT")
         else:
             logger.info("3模型方案: LightGBM + CatBoost + XGBoost (PyTorch不可用)")
 
@@ -524,7 +530,7 @@ class StackingEnsemble:
         ml_models = {k: v for k, v in self.base_models.items()
                      if k in ['lightgbm', 'catboost', 'xgboost']}
         pt_models = {k: v for k, v in self.base_models.items()
-                     if k not in ['lightgbm', 'catboost', 'xgboost']}
+                     if k not in ['lightgbm', 'catboost', 'xgboost', 'spectralm']}
 
         # 并行训练ML模型
         def _train_ml(item):
@@ -551,6 +557,10 @@ class StackingEnsemble:
                              eval_set=[(X_val, y_val)],
                              sample_weight=sw_tr,
                              verbose=False)
+                elif name == 'ngboost':
+                    model.fit(X_tr, y_tr,
+                             X_val=X_val, Y_val=y_val,
+                             early_stopping_rounds=GBDT_EARLY_STOP)
 
                 # 验证集评估
                 preds = model.predict(X_val)
@@ -568,6 +578,34 @@ class StackingEnsemble:
         for name, model in results:
             self.base_models[name] = model
 
+        # 训练 SpectralM (AKRR) — 需要 per-stock 收益率数据
+        if 'spectralm' in self.base_models:
+            logger.info("训练 spectralm (HOAT+VME+SSM+AKRR)...")
+            try:
+                # 从训练数据的 close 价格计算收益率
+                from data_fetcher import load_all_data
+                df_all, _, _ = load_all_data(exclude_last_trading_days=0)
+                returns_dict = {}
+                targets_dict = {}
+                for sid in df_all['stock_id'].unique():
+                    sub = df_all[df_all['stock_id'] == sid].sort_values('date').set_index('date')
+                    if len(sub) < 100:
+                        continue
+                    close = sub['close'].values
+                    open_p = sub['open'].values
+                    rets = np.diff(np.log(close + 1e-10))
+                    # 目标: T+1开盘买入 → T+5开盘卖出收益率
+                    tgt = open_p[5:] / open_p[:-5] - 1
+                    # 对齐
+                    min_len = min(len(rets), len(tgt) - 5)
+                    returns_dict[sid] = rets[-min_len-5:-5] if min_len > 0 else rets
+                    targets_dict[sid] = tgt[-min_len:] if min_len > 0 else tgt
+                preds = self.base_models['spectralm'].fit(returns_dict, targets_dict)
+                logger.info(f"  spectralm 训练完成 ({len(preds)} 只股票有预测)")
+            except Exception as e:
+                logger.warning(f"  spectralm 训练失败: {e}, 从ensemble移除")
+                del self.base_models['spectralm']
+
         # 串行训练PyTorch模型
         if torch_available and torch is not None and pt_models:
             logger.info(f"串行训练 {len(pt_models)} 个PyTorch模型...")
@@ -583,6 +621,9 @@ class StackingEnsemble:
                         model = TimesNetModel(seq_len=SEQ_LEN, n_features=n_feat, d_model=D_MODEL, e_layers=2)
                     elif name == 'dlinear':
                         model = DLinearModel(seq_len=SEQ_LEN, n_features=n_feat)
+                    elif name == 'tft':
+                        model = TFTModel(seq_len=SEQ_LEN, n_features=n_feat, d_model=D_MODEL,
+                                         n_heads=4, lstm_hidden=64, dropout=0.1)
                     model = model.to(device)
 
                     train_ds = SequenceDataset(X_tr, y_tr, SEQ_LEN, sw_tr)
@@ -745,10 +786,13 @@ class StackingEnsemble:
             elif name == 'patchtst':
                 return PatchTSTModel(seq_len=SEQ_LEN, n_features=n_feat, d_model=D_MODEL,
                                     n_heads=N_HEADS, e_layers=E_LAYERS)
-            elif name == 'timesnet':
-                return TimesNetModel(seq_len=SEQ_LEN, n_features=n_feat, d_model=D_MODEL, e_layers=2)
+            elif name == 'spectralm':
+                return SpectralMEnsemble(hoat_window=60, vme_window=60, n_states=5)
             elif name == 'dlinear':
                 return DLinearModel(seq_len=SEQ_LEN, n_features=n_feat)
+            elif name == 'tft':
+                return TFTModel(seq_len=SEQ_LEN, n_features=n_feat, d_model=D_MODEL,
+                                n_heads=4, lstm_hidden=64, dropout=0.1)
             return None
 
         logger.info(f"时间序列滚动交叉验证 ({n_folds} 折)...")
@@ -782,6 +826,9 @@ class StackingEnsemble:
                         sw_tr = sample_weight[train_idx] if sample_weight is not None else None
                         model.fit(X_tr, y_tr, sample_weight=sw_tr)
                         fold_preds[:, model_idx] = model.predict(X_val)
+                    elif name == 'spectralm':
+                        # SpectralM 用 OOF 占位 (训练在主流程中完成, CV 跳过)
+                        pass
                     elif torch_available and torch is not None:
                         model = model.to(device)
                         sw_fold = sample_weight[train_idx] if sample_weight is not None else None
@@ -940,7 +987,7 @@ class StackingEnsemble:
     def save_models(self):
         """保存所有模型"""
         for name, model in self.base_models.items():
-            if name in ['lightgbm', 'catboost', 'xgboost']:
+            if name in ['lightgbm', 'catboost', 'xgboost', 'spectralm']:
                 with open(os.path.join(self.model_dir, f'{name}_model.pkl'), 'wb') as f:
                     pickle.dump(model, f)
             else:
@@ -1080,6 +1127,32 @@ def main():
     logger.info("=" * 60)
     logger.info(f"训练完成! 总耗时: {elapsed:.2f} 小时")
     logger.info("=" * 60)
+
+    # ── SHAP 因子重要性分析 (LightGBM) ──
+    try:
+        from shap_analysis import run_shap_analysis
+        # 采样背景数据
+        n_bg = min(2000, len(X_scaled))
+        rng = np.random.RandomState(RANDOM_SEED)
+        bg_indices = rng.choice(len(X_scaled), n_bg, replace=False)
+        X_bg = X_scaled[bg_indices]
+
+        # 获取特征名：用第一只股票的特征列
+        first_stock = sorted(df['stock_id'].unique())[0]
+        first_df = df[df['stock_id'] == first_stock].sort_values('date').set_index('date')
+        first_features = fe.build_all_features(first_df, industry_df, macro_df)
+        feature_names = list(first_features.columns) + ['volatility_cluster']
+        # 截断或填充到 X 的列数
+        if len(feature_names) < X_bg.shape[1]:
+            feature_names += [f'feature_{i}' for i in range(len(feature_names), X_bg.shape[1])]
+        feature_names = feature_names[:X_bg.shape[1]]
+
+        lgb_path = os.path.join(MODEL_DIR, 'lightgbm_model.pkl')
+        output_dir = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), 'output')
+        shap_result = run_shap_analysis(lgb_path, X_bg, feature_names, output_dir)
+        logger.info(f"SHAP分析完成, top-3: {', '.join(f['feature'] + '=' + str(round(f['shap_importance'], 4)) for f in shap_result[:3])}")
+    except Exception as e:
+        logger.warning(f"SHAP分析跳过: {e}")
 
     return True
 

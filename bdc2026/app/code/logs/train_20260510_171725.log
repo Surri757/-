@@ -1,0 +1,58 @@
+[17:17:27] INFO - GPU: NVIDIA GeForce RTX 4060 Laptop GPU
+[17:17:27] INFO - ============================================================
+[17:17:27] INFO - 股价预测模型 - 训练主程序
+[17:17:27] INFO - 开始时间: 2026-05-10 17:17:27
+[17:17:27] INFO - ============================================================
+[17:20:12] INFO - 数据加载完成: 35839 条记录, 300 只股票
+[17:20:12] INFO - 开始特征工程 (300 只股票)...
+[17:20:55] INFO - 特征矩阵: (33561, 130), 目标: (33561,)
+[17:20:55] INFO - 波动率聚类分布: 低=16602, 中=8418, 高=8541
+[17:20:55] INFO - 样本权重: mean=1.73, 高权重占比=24.6%
+[17:20:55] INFO - 7模型方案: LightGBM + CatBoost + XGBoost + PatchTST + TimesNet + DLinear + TFT
+[17:20:55] INFO - 开始训练基础模型...
+[17:20:55] INFO - 训练集: 30205 样本, 验证集: 3356 样本
+[17:20:55] INFO - 并行训练 3 个ML模型...
+[17:20:55] INFO - 训练 lightgbm...
+[17:20:55] INFO - 训练 catboost...
+[17:20:55] INFO - 训练 xgboost...
+[17:20:55] INFO -   lightgbm val MSE=0.004062, IC=0.3031
+[17:20:57] INFO -   xgboost val MSE=0.003072, IC=0.5350
+[17:20:58] INFO -   catboost val MSE=0.003736, IC=0.4110
+[17:20:58] INFO - 串行训练 4 个PyTorch模型...
+[17:20:58] INFO - 训练 patchtst...
+[17:21:02] INFO -   patchtst Epoch 1/50, train=0.0295, val_loss=0.0038, val_ic=0.1462
+[17:21:09] INFO -   patchtst Epoch 5/50, train=0.0041, val_loss=0.0038, val_ic=0.2483
+[17:21:18] INFO -   patchtst Epoch 10/50, train=0.0038, val_loss=0.0036, val_ic=0.2650
+[17:21:28] INFO -   patchtst Epoch 15/50, train=0.0034, val_loss=0.0037, val_ic=0.2989
+[17:21:37] INFO -   patchtst Epoch 20/50, train=0.0031, val_loss=0.0035, val_ic=0.3437
+[17:21:47] INFO -   patchtst Epoch 25/50, train=0.0024, val_loss=0.0033, val_ic=0.4048
+[17:21:56] INFO -   patchtst Epoch 30/50, train=0.0021, val_loss=0.0032, val_ic=0.4172
+[17:22:06] INFO -   patchtst Epoch 35/50, train=0.0025, val_loss=0.0032, val_ic=0.4353
+[17:22:15] INFO -   patchtst Epoch 40/50, train=0.0017, val_loss=0.0032, val_ic=0.4282
+[17:22:25] INFO -   patchtst Epoch 45/50, train=0.0017, val_loss=0.0032, val_ic=0.4253
+[17:22:34] INFO -   patchtst Epoch 50/50, train=0.0014, val_loss=0.0032, val_ic=0.4230
+[17:22:34] INFO -   patchtst 训练完成 (最佳 val_loss=0.003127, val_ic=0.4517)
+[17:22:34] INFO - 训练 timesnet...
+[17:22:39] INFO -   timesnet Epoch 1/50, train=4.2299, val_loss=0.0038, val_ic=0.0000
+[17:22:54] INFO -   timesnet Epoch 5/50, train=0.0039, val_loss=0.0038, val_ic=0.0000
+[17:23:14] INFO -   timesnet Epoch 10/50, train=0.0039, val_loss=0.0038, val_ic=0.0000
+[17:23:26] INFO -   timesnet 早停 @ epoch 13 (best_ic=0.0211)
+[17:23:26] INFO -   timesnet 训练完成 (最佳 val_loss=0.003800, val_ic=0.0211)
+[17:23:26] INFO - 训练 dlinear...
+[17:23:37] INFO -   dlinear Epoch 1/50, train=0.0328, val_loss=0.0077, val_ic=0.0441
+[17:24:22] INFO -   dlinear Epoch 5/50, train=0.0039, val_loss=0.0038, val_ic=0.2209
+[17:25:19] INFO -   dlinear Epoch 10/50, train=0.0035, val_loss=0.0035, val_ic=0.3089
+[17:26:15] INFO -   dlinear Epoch 15/50, train=0.0034, val_loss=0.0034, val_ic=0.3148
+[17:27:11] INFO -   dlinear Epoch 20/50, train=0.0033, val_loss=0.0034, val_ic=0.3435
+[17:28:08] INFO -   dlinear Epoch 25/50, train=0.0031, val_loss=0.0033, val_ic=0.3656
+[17:29:05] INFO -   dlinear Epoch 30/50, train=0.0031, val_loss=0.0032, val_ic=0.3920
+[17:30:02] INFO -   dlinear Epoch 35/50, train=0.0033, val_loss=0.0034, val_ic=0.3321
+[17:30:47] INFO -   dlinear 早停 @ epoch 39 (best_ic=0.3918)
+[17:30:47] INFO -   dlinear 训练完成 (最佳 val_loss=0.003238, val_ic=0.3918)
+[17:30:47] INFO - 训练 tft...
+[17:30:58] ERROR -   tft 训练失败: CUDA out of memory. Tried to allocate 1.90 GiB. GPU 0 has a total capacity of 8.00 GiB of which 0 bytes is free. Of the allocated memory 12.58 GiB is allocated by PyTorch, and 174.55 MiB is reserved by PyTorch but unallocated. If reserved but unallocated memory is large try setting PYTORCH_CUDA_ALLOC_CONF=expandable_segments:True to avoid fragmentation.  See documentation for Memory Management  (https://pytorch.org/docs/stable/notes/cuda.html#environment-variables)
+[17:30:58] INFO - 基础模型训练完成
+[17:30:58] INFO - 生成OOF预测...
+[17:30:58] INFO - 时间序列滚动交叉验证 (6 折)...
+[17:30:58] WARNING -   Fold 1 训练集不足(需要>120, 当前0)，跳过
+[17:30:58] INFO -   Fold 2/6: train=5593, val=5593

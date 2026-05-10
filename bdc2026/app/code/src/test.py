@@ -1,5 +1,7 @@
 """
-预测主程序 - 信号→Gate→执行→风控→复盘 分层架构
+预测主程序 - 默认多层筛选流水线 (cascade)
+用法: python test.py              → 多层筛选+复活赛 (默认)
+      python test.py --mode simple → 单层流水线 (原版)
 """
 import os
 import sys
@@ -8,6 +10,7 @@ import warnings
 import numpy as np
 import pandas as pd
 from datetime import datetime
+from tqdm import tqdm
 from sklearn.preprocessing import StandardScaler
 
 warnings.filterwarnings('ignore')
@@ -37,14 +40,18 @@ from torch.utils.data import DataLoader
 
 sys.path.append(os.path.dirname(os.path.abspath(__file__)))
 from featurework import FeatureEngineering
-from train import (PatchTSTModel, TimesNetModel, DLinearModel, SequenceDataset,
+from train import (PatchTSTModel, DLinearModel, SequenceDataset,
                    set_all_seeds, GBDT_N_ESTIMATORS, GBDT_LR, GBDT_MAX_DEPTH,
                    D_MODEL, N_HEADS, E_LAYERS, PATCH_LEN, STRIDE, WeightedEnsemble)
+from spectral_m import SpectralMEnsemble
+from tft_model import TFTModel
 from signals import SignalGenerator
 from gate import LiveGate
 from risk_manager import RiskManager
 from executor import ExecutionSimulator
 from review import ReviewLayer
+from portfolio_optimizer import PortfolioOptimizer
+from cascade_pipeline import CascadePipeline
 
 device = torch.device('cuda:0' if torch.cuda.is_available() else 'cpu')
 if torch.cuda.is_available():
@@ -366,7 +373,7 @@ class StackingPredictor:
         print("加载模型...")
 
         # ML模型
-        for name in ['lightgbm', 'catboost', 'xgboost']:
+        for name in ['lightgbm', 'catboost', 'xgboost', 'spectralm']:
             fpath = os.path.join(MODEL_DIR, f'{name}_model.pkl')
             if os.path.exists(fpath):
                 with open(fpath, 'rb') as f:
@@ -378,8 +385,9 @@ class StackingPredictor:
         pt_models = {
             'patchtst': PatchTSTModel(seq_len=SEQ_LEN, n_features=100, d_model=D_MODEL,
                                      n_heads=N_HEADS, e_layers=E_LAYERS),
-            'timesnet': TimesNetModel(seq_len=SEQ_LEN, n_features=100, d_model=D_MODEL, e_layers=2),
             'dlinear': DLinearModel(seq_len=SEQ_LEN, n_features=100),
+            'tft': TFTModel(seq_len=SEQ_LEN, n_features=100, d_model=D_MODEL,
+                            n_heads=2, lstm_hidden=48, dropout=0.1),
         }
 
         for name, model in pt_models.items():
@@ -391,17 +399,18 @@ class StackingPredictor:
                     model.load_state_dict(state)
                 except RuntimeError:
                     # 推断实际特征数
-                    key_shape = state.get('revin.gamma', state.get('feature_proj.weight'))
+                    key_shape = state.get('revin.gamma', state.get('feature_proj.weight', state.get('gamma')))
                     if key_shape is not None:
                         n_feat = key_shape.shape[-1] if key_shape.dim() > 1 else key_shape.shape[0]
                         print(f"  重建 {name} (n_features={n_feat})")
                         if name == 'patchtst':
                             model = PatchTSTModel(seq_len=SEQ_LEN, n_features=n_feat, d_model=D_MODEL,
                                                  n_heads=N_HEADS, e_layers=E_LAYERS)
-                        elif name == 'timesnet':
-                            model = TimesNetModel(seq_len=SEQ_LEN, n_features=n_feat, d_model=D_MODEL, e_layers=2)
                         elif name == 'dlinear':
                             model = DLinearModel(seq_len=SEQ_LEN, n_features=n_feat)
+                        elif name == 'tft':
+                            model = TFTModel(seq_len=SEQ_LEN, n_features=n_feat, d_model=D_MODEL,
+                                             n_heads=4, lstm_hidden=64, dropout=0.1)
                         model.load_state_dict(state)
                 model.to(self.device)
                 model.eval()
@@ -438,7 +447,7 @@ class StackingPredictor:
 
         for idx, name in enumerate(self.model_names):
             model = self.base_models[name]
-            if name in ['lightgbm', 'catboost', 'xgboost']:
+            if name in ['lightgbm', 'catboost', 'xgboost', 'spectralm']:
                 base_preds[:, idx] = model.predict(X_scaled)
             else:
                 # PyTorch模型
@@ -509,6 +518,14 @@ def generate_result_csv(final_predictions, output_path=None):
     result['stock_id'] = result['stock_id'].astype(str).str.zfill(6)
     result = result.sort_values('weight', ascending=False)
     result = result.head(5)
+
+    # 强制满仓: 归一化权重使 sum(weight) = 1.0
+    weight_sum = result['weight'].sum()
+    if weight_sum > 0:
+        result['weight'] = result['weight'] / weight_sum
+    else:
+        result['weight'] = 1.0 / len(result)  # 等权兜底
+
     result[['stock_id', 'weight']].to_csv(output_path, index=False, encoding='utf-8')
 
     # 赛事总收益公式: R = Σ(w_i × r_i)，其中 r_i = (P_{T+5}^open / P_{T+1}^open) - 1
@@ -516,17 +533,18 @@ def generate_result_csv(final_predictions, output_path=None):
 
     print(f"\n结果已保存到 {output_path}")
     print(result[['stock_id', 'weight', 'predicted_return']].to_string(index=False))
-    print(f"\n总权重: {result['weight'].sum():.4f}")
+    print(f"\n总权重: {result['weight'].sum():.4f} (已强制满仓)")
     print(f"━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━")
     print(f"赛事总预测收益率: {total_predicted_return:.4%}")
     print(f"  (公式: Σ weight_i × pred_return_i, i=1..{len(result)})")
     print(f"━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━")
 
 
-def main():
+def main(mode='cascade'):
     set_all_seeds()
     print("=" * 60)
-    print("量化交易预测 - 信号→Gate→执行→风控→复盘")
+    mode_label = "多层筛选+复活赛 (cascade)" if mode != 'simple' else "单层流水线 (simple)"
+    print(f"量化交易预测 - {mode_label}")
     print(f"开始时间: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
     print("=" * 60)
 
@@ -575,10 +593,40 @@ def main():
         if 'index_close' in idx_df.columns:
             index_returns = idx_df['index_close'].pct_change().dropna().values[-252:]
 
+    # 信号生成
     signal_gen = SignalGenerator(predictor, fe, industry_df, macro_df,
                                  seq_len=SEQ_LEN, sl_atr_multiplier=SL_ATR_MULTIPLIER)
+
+    print("\n生成交易信号...")
+    signals = signal_gen.generate_all(df, stock_ids)
+    print(f"生成 {len(signals)} 个信号")
+
+    if not signals:
+        print("无有效信号")
+        return False
+
+    # 市场状态 → 止损宽度调整
+    pred_returns = np.array([s.predicted_return for s in signals])
+    regime, sl_multiplier = MarketRegime.detect(index_returns, pred_returns)
+    for s in signals:
+        entry = s.entry_price
+        base_sl_dist = entry - s.stop_loss_price
+        adjusted_sl = entry - base_sl_dist * sl_multiplier
+        s.stop_loss_price = float(max(adjusted_sl, entry * 0.90))
+
+    # ── 分发到具体流水线 ──
+    if mode == 'simple':
+        return _run_simple(df, signals, predictor, fe, index_returns,
+                          pred_returns, sl_multiplier, stock_ids)
+    else:
+        return _run_cascade(df, signals, predictor, fe, industry_df, macro_df,
+                           index_returns, pred_returns)
+
+
+def _run_simple(df, signals, predictor, fe, index_returns, pred_returns, sl_multiplier, stock_ids):
+    """单层流水线 (原版): Gate 过滤 → 组合优化 → 执行"""
     gate = LiveGate(
-        whitelist_stocks=None,  # 不设白名单，全市场选股
+        whitelist_stocks=None,
         max_single_position=1.0,
         min_risk_distance_pct=0.02,
         min_confidence=0.10,
@@ -593,80 +641,209 @@ def main():
     executor = ExecutionSimulator(risk_mgr, default_slippage_bps=5.0)
     review = ReviewLayer(output_dir=OUTPUT_DIR)
 
-    # ── 4. 生成信号 ──
-    print("\n生成交易信号...")
-    signals = signal_gen.generate_all(df, stock_ids)
-    print(f"生成 {len(signals)} 个信号")
-
-    if not signals:
-        print("无有效信号")
-        return False
-
-    # ── 5. 市场状态 → 调整止损宽度 ──
-    pred_returns = np.array([s.predicted_return for s in signals])
-    regime, sl_multiplier = MarketRegime.detect(index_returns, pred_returns)
-
-    # 应用市场状态到止损宽度
-    for s in signals:
-        entry = s.entry_price
-        base_sl_dist = entry - s.stop_loss_price
-        adjusted_sl = entry - base_sl_dist * sl_multiplier
-        s.stop_loss_price = float(max(adjusted_sl, entry * 0.90))  # 硬止损不超过-10%
-
-    # 按预测收益降序排列（优先处理高收益信号）
+    gate.update_regime(index_returns, pred_returns)
+    gate.print_status()
     signals.sort(key=lambda s: s.predicted_return, reverse=True)
 
-    # ── 6. 流水线: Gate → Risk → Execute → Review ──
-    print("\n执行流水线...")
-    for signal in signals:
-        # Gate 校验
+    print("\n执行流水线 (simple)...")
+    passed_signals = []
+    for signal in tqdm(signals, desc="  Gate校验", unit="signal", leave=False):
         passed, reason = gate.validate(signal)
         if not passed:
             review.log_rejection(signal, reason)
-            continue
+        else:
+            passed_signals.append(signal)
 
-        # 以损定仓
-        position_size = risk_mgr.compute_position_size(signal)
-        if position_size <= 0.001:
-            review.log_rejection(signal, f"position_too_small:{position_size:.4f}")
-            continue
+    if not passed_signals:
+        print("所有信号被Gate拒绝")
+        report = review.generate_report()
+        generate_result_csv(review.final_predictions)
+        return True
 
-        # 执行（模拟）
-        exec_record = executor.execute_signal(signal, position_size)
+    candidates = sorted(passed_signals, key=lambda s: s.predicted_return, reverse=True)[:20]
+    mu = np.array([s.predicted_return for s in candidates])
+
+    optimizer = PortfolioOptimizer()
+    price_df = df[df['stock_id'].astype(str).str.zfill(6).isin(
+        [s.stock_id for s in candidates])].copy()
+    if len(price_df) > 0:
+        Sigma = PortfolioOptimizer.estimate_covariance_from_returns(
+            price_df, [s.stock_id for s in candidates], lookback=60)
+    else:
+        Sigma = PortfolioOptimizer.estimate_covariance_from_signals(candidates)
+
+    weights, sel_indices, opt_info = optimizer.optimize(
+        mu, Sigma, method='max_sharpe', max_weight_sum=1.0,
+        max_single=1.0, max_positions=5
+    )
+    print(f"[组合优化] {opt_info['method']} | 候选{opt_info['n_candidates']}只 → "
+          f"选中{opt_info['n_selected']}只 | 总权重={opt_info['weight_sum']:.4f}")
+
+    for idx, w in zip(sel_indices, weights):
+        signal = candidates[idx]
+        if w < 0.001:
+            continue
+        exec_record = executor.execute_signal(signal, w)
         if exec_record is None:
-            continue
-
-        # 登记到Gate（单只股票唯一持仓）
+            exec_record = ExecutionRecord(
+                signal.stock_id, signal.date, signal.entry_price,
+                w, 'manual_optimized', 'filled', 0.0,
+                signal.stop_loss_price, signal.take_profit_price
+            )
+            executor.records.append(exec_record)
         gate.register_position(signal.stock_id, {
-            'stock_id': signal.stock_id,
-            'weight': position_size,
-            'entry_price': exec_record.entry_price,
-            'date': signal.date,
+            'stock_id': signal.stock_id, 'weight': w,
+            'entry_price': exec_record.entry_price, 'date': signal.date,
         })
-
-        # 复盘记录
         review.log_execution(exec_record)
         review.log_slippage(signal.stock_id, signal.entry_price, exec_record.entry_price)
-        review.log_prediction(signal.stock_id, signal.predicted_return, position_size)
+        review.log_prediction(signal.stock_id, signal.predicted_return, w)
 
-    # ── 7. 风控事件记录 ──
     for event in risk_mgr.risk_events:
         review.log_risk_event(event)
 
-    # ── 8. 生成报告和结果 ──
     report = review.generate_report()
     generate_result_csv(review.final_predictions)
 
     print("=" * 60)
     print("流水线执行完成!")
+    gate.print_status()
     print(f"  Gate拒绝: {len(review.rejections)}")
     print(f"  执行成交: {len(review.executions)}")
     print(f"  风险事件: {len(review.risk_events)}")
     print("=" * 60)
+    return True
 
+
+def _run_cascade(df, signals, predictor, fe, industry_df, macro_df,
+                 index_returns, pred_returns):
+    """多层筛选流水线: 分组 → Stage 1 → Stage 2 → 复活赛 → 决赛"""
+
+    # Gate + 组合优化器 (决赛用)
+    gate = LiveGate(
+        whitelist_stocks=None,
+        max_single_position=1.0,
+        min_risk_distance_pct=0.02,
+        min_confidence=0.10,
+        max_positions=5,
+    )
+    gate.update_regime(index_returns, pred_returns)
+    gate.print_status()
+
+    review = ReviewLayer(output_dir=OUTPUT_DIR)
+
+    # Gate 预过滤 (基础风控)
+    passed_signals = []
+    for signal in tqdm(signals, desc="  Gate预过滤", unit="signal", leave=False):
+        passed, reason = gate.validate(signal)
+        if not passed:
+            review.log_rejection(signal, reason)
+        else:
+            passed_signals.append(signal)
+
+    if not passed_signals:
+        print("所有信号被Gate拒绝")
+        review.generate_report()
+        generate_result_csv(review.final_predictions)
+        return True
+
+    print(f"\nGate通过: {len(passed_signals)} 只")
+
+    # ── 多层筛选 ──
+    pipeline = CascadePipeline(predictor, fe, industry_df, macro_df, seq_len=SEQ_LEN)
+    final_candidates, stage_results = pipeline.run(passed_signals, df, verbose=True)
+
+    if not final_candidates:
+        print("所有候选被筛选淘汰")
+        review.generate_report()
+        generate_result_csv(review.final_predictions)
+        return True
+
+    # ── 决赛: 全量 7 模型 Stacking + 组合优化 ──
+    print(f"\n{'='*50}")
+    print(f"决赛: {len(final_candidates)} 只 → 全量 7 模型 Stacking + 组合优化")
+    print(f"{'='*50}")
+
+    # 用 StackingPredictor 的 meta_model 做最终预测
+    mu = []
+    for s in tqdm(final_candidates, desc="  决赛Stacking打分", unit="stock", leave=False):
+        # 用全量 ensemble 重新打分
+        try:
+            stock_data = df[df['stock_id'].astype(str).str.zfill(6) == s.stock_id].sort_values('date').set_index('date')
+            features = fe.build_all_features(stock_data, industry_df, macro_df)
+            features = fe.remove_outliers(features)
+            last_features = features.iloc[-SEQ_LEN:].fillna(0)
+            X = last_features.values.astype(np.float32)
+
+            # 全量 stacking 预测
+            from train import compute_volatility_cluster
+            cluster_id = compute_volatility_cluster(stock_data['close']) if 'close' in stock_data.columns else 1
+            cluster_col = np.full((len(X), 1), cluster_id, dtype=np.float32)
+            X_with_cluster = np.column_stack([X, cluster_col])
+
+            ensemble_pred, ensemble_std = predictor.predict(X_with_cluster)
+            mu.append(float(ensemble_pred))
+        except Exception:
+            mu.append(s.predicted_return)
+
+    mu = np.array(mu)
+
+    # 波动率折扣: 低波票预测收益打折扣, 导向高活性选股
+    for i, s in enumerate(final_candidates):
+        vol_cluster = s.volatility_cluster  # 0低/1中/2高
+        vol_mult = {0: 0.7, 1: 1.0, 2: 1.1}.get(vol_cluster, 1.0)
+        mu[i] *= vol_mult
+    n_lowvol = sum(1 for s in final_candidates if s.volatility_cluster == 0)
+    if n_lowvol > 0:
+        print(f"  波动率折扣: {n_lowvol} 只低波票预测收益 ×0.7")
+
+    # 协方差估计
+    optimizer = PortfolioOptimizer()
+    price_df = df[df['stock_id'].astype(str).str.zfill(6).isin(
+        [s.stock_id for s in final_candidates])].copy()
+    if len(price_df) > 0:
+        Sigma = PortfolioOptimizer.estimate_covariance_from_returns(
+            price_df, [s.stock_id for s in final_candidates], lookback=60)
+    else:
+        Sigma = PortfolioOptimizer.estimate_covariance_from_signals(final_candidates)
+
+    # 组合优化
+    weights, sel_indices, opt_info = optimizer.optimize(
+        mu, Sigma, method='max_sharpe', max_weight_sum=1.0,
+        max_single=1.0, max_positions=5
+    )
+    print(f"[决赛] {opt_info['method']} | 候选{opt_info['n_candidates']}只 → "
+          f"选中{opt_info['n_selected']}只 | 总权重={opt_info['weight_sum']:.4f}")
+
+    # 记录最终结果
+    for idx, w in zip(sel_indices, weights):
+        signal = final_candidates[idx]
+        if w < 0.001:
+            continue
+        review.log_prediction(signal.stock_id, mu[idx], w)
+
+    report = review.generate_report()
+    generate_result_csv(review.final_predictions)
+
+    print("=" * 60)
+    print("流水线执行完成! (cascade)")
+    gate.print_status()
+    print(f"  Gate拒绝: {len(review.rejections)}")
+    print(f"  决赛选中: {opt_info['n_selected']} 只")
+    print(f"  总权重: {opt_info['weight_sum']:.4f}")
+    print("=" * 60)
     return True
 
 
 if __name__ == "__main__":
-    success = main()
+    mode = 'cascade'  # 默认多层筛选
+    for i, arg in enumerate(sys.argv[1:], 1):
+        if arg in ('--mode', '-m') and i < len(sys.argv) - 1:
+            if sys.argv[i + 1] in ('simple', 'cascade'):
+                mode = sys.argv[i + 1]
+                break
+        elif arg in ('simple', 'cascade'):
+            mode = arg
+            break
+    success = main(mode=mode)
     sys.exit(0 if success else 1)

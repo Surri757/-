@@ -1,0 +1,109 @@
+[00:45:24] INFO - GPU: NVIDIA GeForce RTX 4060 Laptop GPU
+[00:45:24] INFO - ============================================================
+[00:45:24] INFO - 股价预测模型 - 训练主程序
+[00:45:24] INFO - 开始时间: 2026-05-11 00:45:24
+[00:45:24] INFO - ============================================================
+[00:45:46] INFO - 数据加载完成: 35839 条记录, 300 只股票
+[00:45:46] INFO - 开始特征工程 (300 只股票)...
+[00:46:19] INFO - 特征矩阵: (33561, 130), 目标: (33561,)
+[00:46:19] INFO - 波动率聚类分布: 低=16602, 中=8418, 高=8541
+[00:46:19] INFO - 样本权重: mean=1.73, 高权重占比=24.6%
+[00:46:19] INFO - 7模型方案: LightGBM + CatBoost + XGBoost + SpectralM + PatchTST + DLinear + TFT
+[00:46:19] INFO - 开始训练基础模型...
+[00:46:19] INFO - 训练集: 30205 样本, 验证集: 3356 样本
+[00:46:19] INFO - 并行训练 3 个ML模型...
+[00:46:19] INFO - 训练 lightgbm...
+[00:46:19] INFO - 训练 catboost...
+[00:46:19] INFO - 训练 xgboost...
+[00:46:20] INFO -   lightgbm val MSE=0.003457, IC=0.4665
+[00:46:21] INFO -   xgboost val MSE=0.003040, IC=0.5395
+[00:46:22] INFO -   catboost val MSE=0.003629, IC=0.4317
+[00:46:22] INFO - 训练 spectralm (HOAT+VME+SSM+AKRR)...
+[00:50:29] WARNING -   spectralm 训练失败: Unable to allocate 12.9 GiB for an array with shape (41633, 41633) and data type float64, 从ensemble移除
+[00:50:30] INFO - 串行训练 3 个PyTorch模型...
+[00:50:30] INFO - 训练 patchtst...
+[00:50:35] INFO -   patchtst Epoch 1/50, train=0.0300, val_loss=0.0038, val_ic=0.1043
+[00:50:43] INFO -   patchtst Epoch 5/50, train=0.0041, val_loss=0.0038, val_ic=0.2225
+[00:50:53] INFO -   patchtst Epoch 10/50, train=0.0038, val_loss=0.0037, val_ic=0.2267
+[00:51:03] INFO -   patchtst Epoch 15/50, train=0.0034, val_loss=0.0037, val_ic=0.2689
+[00:51:12] INFO -   patchtst Epoch 20/50, train=0.0034, val_loss=0.0035, val_ic=0.3143
+[00:51:21] INFO -   patchtst Epoch 25/50, train=0.0025, val_loss=0.0034, val_ic=0.3657
+[00:51:31] INFO -   patchtst Epoch 30/50, train=0.0022, val_loss=0.0033, val_ic=0.3869
+[00:51:40] INFO -   patchtst Epoch 35/50, train=0.0026, val_loss=0.0035, val_ic=0.3498
+[00:51:50] INFO -   patchtst Epoch 40/50, train=0.0019, val_loss=0.0033, val_ic=0.3602
+[00:51:50] INFO -   patchtst 早停 @ epoch 40 (best_ic=0.3869)
+[00:51:50] INFO -   patchtst 训练完成 (最佳 val_loss=0.003342, val_ic=0.3869)
+[00:51:50] INFO - 训练 dlinear...
+[00:52:00] INFO -   dlinear Epoch 1/50, train=0.0335, val_loss=0.0076, val_ic=0.0634
+[00:52:46] INFO -   dlinear Epoch 5/50, train=0.0040, val_loss=0.0037, val_ic=0.2335
+[00:53:42] INFO -   dlinear Epoch 10/50, train=0.0035, val_loss=0.0034, val_ic=0.3160
+[00:54:40] INFO -   dlinear Epoch 15/50, train=0.0034, val_loss=0.0034, val_ic=0.3295
+[00:55:36] INFO -   dlinear Epoch 20/50, train=0.0033, val_loss=0.0033, val_ic=0.3789
+[00:56:34] INFO -   dlinear Epoch 25/50, train=0.0032, val_loss=0.0033, val_ic=0.3803
+[00:57:31] INFO -   dlinear Epoch 30/50, train=0.0031, val_loss=0.0032, val_ic=0.4011
+[00:58:28] INFO -   dlinear Epoch 35/50, train=0.0033, val_loss=0.0034, val_ic=0.3496
+[00:59:14] INFO -   dlinear 早停 @ epoch 39 (best_ic=0.4010)
+[00:59:14] INFO -   dlinear 训练完成 (最佳 val_loss=0.003207, val_ic=0.4010)
+[00:59:14] INFO - 训练 tft...
+[00:59:16] INFO -   tft Epoch 1/50, train=0.0611, val_loss=0.0037, val_ic=0.1522
+[00:59:25] INFO -   tft Epoch 5/50, train=0.0039, val_loss=0.0038, val_ic=0.2530
+[00:59:36] INFO -   tft Epoch 10/50, train=0.0035, val_loss=0.0035, val_ic=0.3148
+[00:59:48] INFO -   tft Epoch 15/50, train=0.0035, val_loss=0.0035, val_ic=0.3260
+[00:59:59] INFO -   tft Epoch 20/50, train=0.0035, val_loss=0.0037, val_ic=0.2971
+[01:00:10] INFO -   tft Epoch 25/50, train=0.0028, val_loss=0.0033, val_ic=0.3756
+[01:00:21] INFO -   tft Epoch 30/50, train=0.0025, val_loss=0.0032, val_ic=0.3922
+[01:00:32] INFO -   tft Epoch 35/50, train=0.0028, val_loss=0.0034, val_ic=0.3667
+[01:00:44] INFO -   tft Epoch 40/50, train=0.0029, val_loss=0.0036, val_ic=0.3805
+[01:00:55] INFO -   tft Epoch 45/50, train=0.0023, val_loss=0.0033, val_ic=0.3543
+[01:00:57] INFO -   tft 早停 @ epoch 46 (best_ic=0.3969)
+[01:00:57] INFO -   tft 训练完成 (最佳 val_loss=0.003228, val_ic=0.3969)
+[01:00:57] INFO - 基础模型训练完成
+[01:00:57] INFO - 生成OOF预测...
+[01:00:57] INFO - 时间序列滚动交叉验证 (6 折)...
+[01:00:57] WARNING -   Fold 1 训练集不足(需要>120, 当前0)，跳过
+[01:00:57] INFO -   Fold 2/6: train=5593, val=5593
+[01:01:46] INFO -   Fold 3/6: train=11186, val=5593
+[01:03:19] INFO -   Fold 4/6: train=16779, val=5593
+[01:05:28] INFO -   Fold 5/6: train=22372, val=5593
+[01:08:28] INFO -   Fold 6/6: train=27965, val=5596
+[01:12:12] INFO - 训练Stacking元模型...
+[01:12:12] INFO - NNLS权重: IC=0.3980, MSE=0.001897
+[01:12:12] INFO - IC优化权重: IC=0.3998, MSE=0.001897
+[01:12:12] INFO - 选用IC优化权重 (IC=0.3998)
+[01:12:12] INFO -   lightgbm: 0.2388 (有效)
+[01:12:12] INFO -   catboost: 0.0000 (被压缩)
+[01:12:12] INFO -   xgboost: 0.3202 (有效)
+[01:12:12] INFO -   patchtst: 0.1527 (有效)
+[01:12:12] INFO -   dlinear: 0.0907 (有效)
+[01:12:12] INFO -   tft: 0.1975 (有效)
+[01:12:12] INFO - 元模型 OOF MSE=0.001897, IC=0.3948
+[01:12:12] INFO - 
+============================================================
+[01:12:12] INFO - 模型评估结果
+[01:12:12] INFO - ============================================================
+[01:12:12] INFO - 
+lightgbm:
+[01:12:12] INFO -   MSE=0.002111, MAE=0.030852, R2=0.0986, IC=0.4149
+[01:12:12] INFO - 
+catboost:
+[01:12:12] INFO -   MSE=0.002211, MAE=0.031659, R2=0.0557, IC=0.3846
+[01:12:12] INFO - 
+xgboost:
+[01:12:12] INFO -   MSE=0.002088, MAE=0.030720, R2=0.1082, IC=0.4216
+[01:12:12] INFO - 
+patchtst:
+[01:12:12] INFO -   MSE=0.002292, MAE=0.030937, R2=0.0263, IC=0.2557
+[01:12:12] INFO - 
+dlinear:
+[01:12:12] INFO -   MSE=0.002358, MAE=0.031897, R2=-0.0017, IC=0.2574
+[01:12:12] INFO - 
+tft:
+[01:12:12] INFO -   MSE=0.002268, MAE=0.031183, R2=0.0366, IC=0.2525
+[01:12:12] INFO - 
+Stacking Ensemble:
+[01:12:12] INFO -   MSE=0.001897, MAE=0.028332, R2=0.1484, IC=0.3948
+[01:12:12] INFO - 模型已保存到 D:\stockclone\bdc2026\app\code\src\model
+[01:12:12] INFO - ============================================================
+[01:12:12] INFO - 训练完成! 总耗时: 0.45 小时
+[01:12:12] INFO - ============================================================
+[01:12:14] INFO - SHAP分析完成, top-3: volatility_cluster=0.0075, industry_pe_percentile=0.0037, return_120d=0.0037
