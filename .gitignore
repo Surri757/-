@@ -1,0 +1,24 @@
+# Python bytecode
+__pycache__/
+*.pyc
+*.pyo
+
+# Training artifacts
+catboost_info/
+*.log
+train_output.log
+train_error.log
+
+# Logs directory
+logs/
+
+# Claude Code local config
+.claude/
+
+# Output/results (runtime artifacts)
+output/
+!bdc2026/app/code/src/model/
+
+# OS generated
+.DS_Store
+Thumbs.db

@@ -1,10 +1,12 @@
 """
 数据获取模块 - 多源数据融合 (修复版)
+支持离线缓存: 有网自动更新, 无网静默使用本地数据
 """
 import os
+import socket
 import numpy as np
 import pandas as pd
-from datetime import datetime
+from datetime import datetime, timedelta
 
 np.random.seed(42)
 
@@ -12,6 +14,26 @@ np.random.seed(42)
 LOOKBACK_DAYS = 365        # 动态1年数据窗口
 MIN_LISTED_YEARS = 0.5       # 动态窗口下放宽至半年
 MIN_DAILY_AMOUNT = 1e8
+MACRO_CACHE_DAYS = 7         # 宏观数据缓存有效期(天)
+EXCLUDE_LAST_TRADING_DAYS = 30  # 防信息泄露: 排除最近30个交易日 (5日预测只需排除5天, 30天留足余量)
+
+
+def check_internet(timeout=2.0):
+    """快速检测网络连通性 (DNS+TCP, 不发起HTTP请求)"""
+    for host in ('223.5.5.5', '8.8.8.8'):
+        try:
+            s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+            s.settimeout(timeout)
+            s.connect((host, 53))
+            s.close()
+            return True
+        except (socket.timeout, OSError):
+            continue
+    return False
+
+
+def _get_data_dir():
+    return os.path.join(os.path.dirname(__file__), '..', 'data')
 
 
 def download_baostock_data():
@@ -138,12 +160,76 @@ def _parse_chinese_month(date_str):
     return pd.NaT
 
 
+# ── 智能宏观/行业数据加载 (缓存 + 离线兜底) ──
+
+def load_macro_data(force_refresh=False):
+    """加载宏观经济数据: 在线→下载并缓存, 离线→读缓存, 无缓存→模拟数据"""
+    data_dir = _get_data_dir()
+    os.makedirs(data_dir, exist_ok=True)
+    cache_path = os.path.join(data_dir, 'macro_cache.csv')
+    cache_exists = os.path.exists(cache_path)
+
+    online = check_internet()
+
+    # 检查缓存新鲜度
+    cache_fresh = False
+    if cache_exists:
+        cache_mtime = datetime.fromtimestamp(os.path.getmtime(cache_path))
+        cache_fresh = (datetime.now() - cache_mtime).days < MACRO_CACHE_DAYS
+
+    if online and (force_refresh or not cache_fresh):
+        # 在线且缓存过期 → 下载并更新缓存
+        macro_df = download_akshare_macro_data()
+        if macro_df is not None and len(macro_df) > 0:
+            macro_df.to_csv(cache_path, index=False)
+            print(f"  宏观数据已缓存至 {cache_path}")
+            return macro_df
+        # 下载失败, 尝试用旧缓存
+        if cache_exists:
+            print("  下载失败, 使用本地缓存的宏观数据")
+            return pd.read_csv(cache_path, parse_dates=['date'])
+
+    if cache_exists:
+        age = (datetime.now() - datetime.fromtimestamp(os.path.getmtime(cache_path))).days
+        print(f"  使用本地宏观数据缓存 (已缓存{age}天前)")
+        return pd.read_csv(cache_path, parse_dates=['date'])
+
+    # 无网无缓存 → 模拟数据
+    if not online:
+        print("  离线模式: 使用模拟宏观经济数据")
+    else:
+        print("  下载失败且无本地缓存, 使用模拟宏观经济数据")
+    return generate_macro_data()
+
+
+def load_industry_data():
+    """加载行业数据: 优先缓存, 否则生成模拟数据"""
+    data_dir = _get_data_dir()
+    os.makedirs(data_dir, exist_ok=True)
+    cache_path = os.path.join(data_dir, 'industry_cache.csv')
+
+    if os.path.exists(cache_path):
+        cache_mtime = datetime.fromtimestamp(os.path.getmtime(cache_path))
+        age = (datetime.now() - cache_mtime).days
+        if age < MACRO_CACHE_DAYS * 2:
+            print(f"  使用本地行业数据缓存 (已缓存{age}天前)")
+            return pd.read_csv(cache_path, parse_dates=['date'])
+
+    # 生成模拟数据并缓存
+    industry_df = generate_industry_data()
+    industry_df.to_csv(cache_path, index=False)
+    print(f"  行业数据已缓存至 {cache_path}")
+    return industry_df
+
+
 def download_akshare_macro_data():
     """从AKShare下载真实宏观经济数据（免费公开数据源）"""
     try:
         import akshare as ak
     except ImportError:
-        print("akshare未安装，使用模拟宏观数据")
+        return None
+
+    if not check_internet():
         return None
 
     print("从AKShare下载真实宏观经济数据...")
@@ -164,8 +250,8 @@ def download_akshare_macro_data():
                 pass
         success_count += 1
         print("  CPI数据获取成功")
-    except Exception as e:
-        print(f"  CPI获取失败: {e}")
+    except Exception:
+        pass
 
     # --- PPI 月度同比 ---
     try:
@@ -181,8 +267,8 @@ def download_akshare_macro_data():
                 pass
         success_count += 1
         print("  PPI数据获取成功")
-    except Exception as e:
-        print(f"  PPI获取失败: {e}")
+    except Exception:
+        pass
 
     # --- PMI ---
     try:
@@ -198,8 +284,8 @@ def download_akshare_macro_data():
                     macro_records.append({'date': d, 'indicator': 'pmi_nonmanufacturing', 'value': float(val_nonmanufacturing)})
         success_count += 1
         print("  PMI数据获取成功")
-    except Exception as e:
-        print(f"  PMI获取失败: {e}")
+    except Exception:
+        pass
 
     # --- M2 ---
     try:
@@ -215,8 +301,8 @@ def download_akshare_macro_data():
                     macro_records.append({'date': d, 'indicator': 'm2_yoy', 'value': float(m2_yoy)})
         success_count += 1
         print("  M2数据获取成功")
-    except Exception as e:
-        print(f"  M2获取失败: {e}")
+    except Exception:
+        pass
 
     # --- LPR (利率) ---
     try:
@@ -229,8 +315,8 @@ def download_akshare_macro_data():
                 macro_records.append({'date': d, 'indicator': 'lpr_5y', 'value': float(row['LPR5Y'])})
         success_count += 1
         print("  LPR数据获取成功")
-    except Exception as e:
-        print(f"  LPR获取失败: {e}")
+    except Exception:
+        pass
 
     # --- 汇率 USDCNY ---
     try:
@@ -242,11 +328,10 @@ def download_akshare_macro_data():
                 macro_records.append({'date': d, 'indicator': 'usdcny', 'value': float(rate)})
         success_count += 1
         print("  汇率数据获取成功")
-    except Exception as e:
-        print(f"  汇率获取失败: {e}")
+    except Exception:
+        pass
 
     if success_count < 2:
-        print(f"  仅成功获取 {success_count}/6 项宏观数据，回退到模拟数据")
         return None
 
     # 转换为宽表格式
@@ -478,7 +563,7 @@ def _get_local_latest_date(csv_path):
         return None
 
 
-def load_all_data(data_dir=None, force_refresh=True, exclude_last_trading_days=0):
+def load_all_data(data_dir=None, force_refresh=True, exclude_last_trading_days=EXCLUDE_LAST_TRADING_DAYS):
     """加载并融合所有数据源（智能刷新：仅当baostock有新数据时才重新下载）
 
     参数:
@@ -541,12 +626,9 @@ def load_all_data(data_dir=None, force_refresh=True, exclude_last_trading_days=0
             print("错误：无法获取数据")
             raise RuntimeError("无法获取数据，请确保网络连接正常或提供本地数据")
 
-    # 宏观数据：尝试AKShare真实数据，失败则回退到模拟数据
-    macro_df = download_akshare_macro_data()
-    if macro_df is None:
-        macro_df = generate_macro_data()
-    # 行业数据：目前用模拟数据（AKShare申万行业指数接口不稳定）
-    industry_df = generate_industry_data()
+    # 宏观/行业数据: 智能缓存 + 离线兜底
+    macro_df = load_macro_data()
+    industry_df = load_industry_data()
 
     # 预处理
     if stock_df is not None and len(stock_df) > 0:

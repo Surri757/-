@@ -29,24 +29,30 @@ class StockSignal:
 
 
 class SignalGenerator:
-    """信号生成器：特征工程 + 模型预测 + 信号增强"""
+    """信号生成器：特征工程 + 模型预测 + 信号增强 (含横截面增强)"""
 
     def __init__(self, predictor, feature_eng, industry_df=None, macro_df=None,
-                 seq_len=60, sl_atr_multiplier=2.0):
+                 seq_len=60, sl_atr_multiplier=2.0, stock_industry_map=None):
         self.predictor = predictor
         self.fe = feature_eng
         self.industry_df = industry_df
         self.macro_df = macro_df
         self.seq_len = seq_len
         self.sl_atr_multiplier = sl_atr_multiplier
+        self.stock_industry_map = stock_industry_map or {}
 
     def generate_all(self, df: pd.DataFrame, stock_ids: List[str]) -> List[StockSignal]:
-        """为所有股票生成信号"""
+        """为所有股票生成信号 (含横截面增强)"""
         signals = []
         for stock_id in stock_ids:
             signal = self.generate_one(df, stock_id)
             if signal is not None:
                 signals.append(signal)
+
+        # 横截面增强: 让信号包含"相对强弱"信息
+        if len(signals) >= 5:
+            signals = self._apply_cross_sectional_enhancement(signals)
+
         return signals
 
     def generate_one(self, df: pd.DataFrame, stock_id: str) -> Optional[StockSignal]:
@@ -71,7 +77,8 @@ class SignalGenerator:
         X = np.column_stack([X_raw, cluster_col])
 
         # 预测
-        pred_return, pred_std = self.predictor.predict(X)
+        pred_return, pred_std = self.predictor.predict(
+            X, historical_prices=stock_df['close'].values if 'close' in stock_df.columns else None)
 
         # 信号增强
         latest = stock_df.iloc[-1]
@@ -104,6 +111,66 @@ class SignalGenerator:
             model_std=float(pred_std),
             volatility_cluster=cluster_id,
         )
+
+    def _apply_cross_sectional_enhancement(self, signals: List[StockSignal]) -> List[StockSignal]:
+        """横截面增强: 同一天所有股票之间做相对强弱排名
+
+        核心逻辑:
+        - 截面 z-score: 该股票在同日所有股票中的相对位置
+        - 行业 z-score: 该股票在同行业内的相对位置
+        - 将相对排名注入 predicted_return 和 confidence
+        - 绝对预测强 + 相对排名高 = 最强信号
+        """
+        returns = np.array([s.predicted_return for s in signals])
+        mean_ret = float(np.mean(returns))
+        std_ret = float(np.std(returns))
+        if std_ret < 1e-6:
+            return signals
+
+        # ── 截面 z-score ──
+        cs_zscores = (returns - mean_ret) / std_ret
+
+        # ── 行业相对 z-score ──
+        ind_zscores = np.zeros(len(signals))
+        if self.stock_industry_map:
+            ind_groups = {}
+            for i, s in enumerate(signals):
+                ind = self.stock_industry_map.get(s.stock_id, '其他')
+                ind_groups.setdefault(ind, []).append(i)
+            for ind, indices in ind_groups.items():
+                if len(indices) >= 3:
+                    ind_rets = returns[indices]
+                    ind_std = float(np.std(ind_rets))
+                    if ind_std > 1e-6:
+                        ind_zscores[indices] = (ind_rets - float(np.mean(ind_rets))) / ind_std
+
+        # ── 增强: 将相对排名注入 predicted_return ──
+        # 混合权重: 60% 绝对预测 + 40% 截面相对位置
+        # 截面位置 = mean + cs_z * std (该股票在截面分布中的"合理"预测值)
+        cross_sectional_value = mean_ret + cs_zscores * std_ret
+        for i, s in enumerate(signals):
+            # 行业相对也参与混合
+            ind_weight = 0.15 if abs(ind_zscores[i]) > 0.5 else 0.0
+            cs_weight = 0.40 - ind_weight
+
+            enhanced_ret = ((1.0 - cs_weight - ind_weight) * s.predicted_return
+                            + cs_weight * cross_sectional_value[i]
+                            + ind_weight * (mean_ret + ind_zscores[i] * std_ret))
+
+            s.predicted_return = float(enhanced_ret)
+
+            # 置信度增强: 截面排名前 20% + 行业排名前 30% 的信号更可信
+            cs_bonus = max(0.0, cs_zscores[i]) * 0.15
+            ind_bonus = max(0.0, ind_zscores[i]) * 0.08
+            s.confidence = float(np.clip(s.confidence + cs_bonus + ind_bonus, 0.0, 1.0))
+
+        top_n = min(5, len(signals))
+        top_cs = int(np.sum(cs_zscores >= 1.0))
+        top_ind = int(np.sum(ind_zscores >= 1.0))
+        print(f"[横截面增强] {len(signals)}只 → 截面z≥1: {top_cs}只, 行业z≥1: {top_ind}只 | "
+              f"均值={mean_ret:.3%} σ={std_ret:.3%} | 前{top_n}均值={np.mean(sorted(returns)[-top_n:]):.3%}")
+
+        return signals
 
     @staticmethod
     def _compute_atr(stock_df, period=14):

@@ -8,6 +8,66 @@ import numpy as np
 from spectral_m import SpectralStateMachine
 
 
+def detect_market_regime(index_returns=None, predicted_returns=None):
+    """检测市场状态，返回 (regime, scores_dict)
+
+    可被 Gate 和外部调用者复用，避免重复逻辑。
+
+    Args:
+        index_returns: 大盘指数日收益率序列（最近252个交易日）
+        predicted_returns: 当前批次所有信号的预测收益率列表
+
+    Returns:
+        regime: 'bull' | 'sideways' | 'bear' | 'panic' | 'neutral'
+        scores: dict with keys trend, vol, pred, sharpe, pos_ratio
+    """
+    scores = {'trend': 0.0, 'vol': 1.0, 'pred': 0.5, 'sharpe': 0.0, 'pos_ratio': 0.5}
+
+    if index_returns is None or len(index_returns) < 20:
+        return 'neutral', scores
+
+    ret_5d = np.mean(index_returns[-5:])
+    ret_20d = np.mean(index_returns[-20:])
+    ret_60d = np.mean(index_returns[-60:]) if len(index_returns) >= 60 else ret_20d
+    vol_20d = np.std(index_returns[-20:])
+    vol_60d = np.std(index_returns[-60:]) if len(index_returns) >= 60 else vol_20d
+    vol_change = vol_20d / (vol_60d + 1e-8)
+
+    # 预测质量
+    if predicted_returns is not None and len(predicted_returns) > 0:
+        preds = np.asarray(predicted_returns)
+        pred_mean = np.mean(preds)
+        pred_std = np.std(preds) + 1e-8
+        scores['sharpe'] = pred_mean / pred_std
+        scores['pos_ratio'] = np.mean(preds > 0)
+        scores['pred'] = np.clip(scores['sharpe'] / 2.0 + 0.5, 0.2, 1.0)
+        scores['pred'] *= (0.5 + 0.5 * scores['pos_ratio'])
+
+    # 趋势分
+    trend_5d = np.clip(ret_5d / 0.03, -1, 1)
+    trend_20d = np.clip(ret_20d / 0.05, -1, 1)
+    trend_60d = np.clip(ret_60d / 0.08, -1, 1)
+    scores['trend'] = 0.3 * trend_5d + 0.4 * trend_20d + 0.3 * trend_60d
+
+    # 波动分
+    vol_penalty = np.clip(vol_change - 0.8, 0, 1) * 0.3 + np.clip(vol_20d / 0.025 - 0.5, 0, 1) * 0.3
+    scores['vol'] = 1.0 - np.clip(vol_penalty, 0, 0.6)
+
+    # 市场状态识别
+    if ret_5d < -0.03 and vol_change > 1.5:
+        regime = 'panic'
+    elif ret_20d < -0.01 and vol_change > 1.2:
+        regime = 'bear'
+    elif ret_20d > 0.01:
+        regime = 'bull'
+    elif abs(ret_20d) < 0.003:
+        regime = 'sideways'
+    else:
+        regime = 'neutral'
+
+    return regime, scores
+
+
 class LiveGate:
     """实盘准入校验器 (动态阈值)
 
@@ -68,7 +128,7 @@ class LiveGate:
             index_returns: 大盘指数日收益率序列（最近252个交易日）
             predicted_returns: 当前批次所有信号的预测收益率列表
         """
-        regime, scores = self._detect_regime(index_returns, predicted_returns)
+        regime, scores = detect_market_regime(index_returns, predicted_returns)
         self.regime = regime
         self.trend_score = scores['trend']
         self.vol_score = scores['vol']
@@ -81,54 +141,6 @@ class LiveGate:
         self.ssm_state = ssm_state  # 0..4 隐状态
 
         self._adapt_thresholds(regime, scores, ssm_state)
-
-    def _detect_regime(self, index_returns, predicted_returns):
-        """检测市场状态，返回 (regime, scores_dict)"""
-        scores = {'trend': 0.0, 'vol': 1.0, 'pred': 0.5, 'sharpe': 0.0, 'pos_ratio': 0.5}
-
-        if index_returns is None or len(index_returns) < 20:
-            return 'neutral', scores
-
-        ret_5d = np.mean(index_returns[-5:])
-        ret_20d = np.mean(index_returns[-20:])
-        ret_60d = np.mean(index_returns[-60:]) if len(index_returns) >= 60 else ret_20d
-        vol_20d = np.std(index_returns[-20:])
-        vol_60d = np.std(index_returns[-60:]) if len(index_returns) >= 60 else vol_20d
-        vol_change = vol_20d / (vol_60d + 1e-8)
-
-        # 预测质量
-        if predicted_returns is not None and len(predicted_returns) > 0:
-            preds = np.asarray(predicted_returns)
-            pred_mean = np.mean(preds)
-            pred_std = np.std(preds) + 1e-8
-            scores['sharpe'] = pred_mean / pred_std
-            scores['pos_ratio'] = np.mean(preds > 0)
-            scores['pred'] = np.clip(scores['sharpe'] / 2.0 + 0.5, 0.2, 1.0)
-            scores['pred'] *= (0.5 + 0.5 * scores['pos_ratio'])
-
-        # 趋势分
-        trend_5d = np.clip(ret_5d / 0.03, -1, 1)
-        trend_20d = np.clip(ret_20d / 0.05, -1, 1)
-        trend_60d = np.clip(ret_60d / 0.08, -1, 1)
-        scores['trend'] = 0.3 * trend_5d + 0.4 * trend_20d + 0.3 * trend_60d
-
-        # 波动分
-        vol_penalty = np.clip(vol_change - 0.8, 0, 1) * 0.3 + np.clip(vol_20d / 0.025 - 0.5, 0, 1) * 0.3
-        scores['vol'] = 1.0 - np.clip(vol_penalty, 0, 0.6)
-
-        # 市场状态识别
-        if ret_5d < -0.03 and vol_change > 1.5:
-            regime = 'panic'
-        elif ret_20d < -0.01 and vol_change > 1.2:
-            regime = 'bear'
-        elif ret_20d > 0.01:
-            regime = 'bull'
-        elif abs(ret_20d) < 0.003:
-            regime = 'sideways'
-        else:
-            regime = 'neutral'
-
-        return regime, scores
 
     def _detect_ssm_state(self, index_returns, predicted_returns, scores):
         """SSM 谱状态机: 从市场指标向量识别微观隐状态

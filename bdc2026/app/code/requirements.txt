@@ -10,7 +10,8 @@ xgboost==2.0.3
 torch==2.2.1
 torchvision==0.17.1
 torchaudio==2.2.1
-ngboost==0.4.1
 scipy==1.13.1
 statsmodels==0.14.2
+matplotlib==3.8.5
 shap>=0.44.0
+tqdm

@@ -5,8 +5,9 @@ $expectedFiles = @(
     "catboost_model.pkl",
     "xgboost_model.pkl",
     "patchtst_model.pth",
-    "timesnet_model.pth",
     "dlinear_model.pth",
+    "tft_model.pth",
+    "spectralm_model.pkl",
     "meta_model.pkl",
     "scaler.pkl"
 )

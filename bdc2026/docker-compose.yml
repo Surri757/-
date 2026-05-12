@@ -11,11 +11,11 @@ services:
       - NVIDIA_VISIBLE_DEVICES=all
       - CUDA_VISIBLE_DEVICES=0
     volumes:
-      - ./app/data:/app/data
+      - ./app/code/data:/app/code/data
       - ./app/output:/app/output
       - ./app/temp:/app/temp
     working_dir: /app
-    command: bash -c "bash code/init.sh && bash code/train.sh"
+    command: bash -c "bash code/init.sh && bash code/train.sh && bash code/test.sh"
     deploy:
       resources:
         reservations:

@@ -32,21 +32,21 @@
 - 开源链接: https://github.com/pytorch/pytorch
 - 官方预训练模型: 未使用
 
-### 5. NGboost
-- 版本: 0.4.1
-- 开源协议: MIT
-- 开源链接: https://github.com/stanfordmlgroup/ngboost
-- 源码MD5: (从头训练，无预训练权重)
-
-### 6. scikit-learn
+### 5. scikit-learn
 - 版本: 1.5.0
 - 开源协议: BSD-3-Clause
 - 开源链接: https://github.com/scikit-learn/scikit-learn
 - 源码MD5: (从头训练，无预训练权重)
 
+### 6. SciPy
+- 版本: 1.13.1
+- 开源协议: BSD-3-Clause
+- 开源链接: https://github.com/scipy/scipy
+- 源码MD5: (仅用于优化求解，无预训练权重)
+
 ## 模型架构
 
-本项目使用的深度学习模型（PatchTST、TimesNet、DLinear）为自定义架构，
+本项目使用的深度学习模型（PatchTST、DLinear、TFT）为自定义架构，
 参考了以下论文和开源实现：
 
 ### PatchTST
@@ -55,17 +55,26 @@
 - 本项目从头训练，无预训练权重
 - 开源时间: 2023年2月（符合2026年4月1日前要求）
 
-### TimesNet
-- 论文: "TimesNet: Temporal 2D-Variation Modeling for Time Series"
-- 开源实现参考: https://github.com/thuml/TimesNet
-- 本项目从头训练，无预训练权重
-- 开源时间: 2023年2月（符合2026年4月1日前要求）
-
 ### DLinear
 - 论文: "DLinear: A Simple Yet Effective Transformer for Time Series Forecasting"
 - 开源实现参考: https://github.com/cure编/DLinear
 - 本项目从头训练，无预训练权重
 - 开源时间: 2023年12月（符合2026年4月1日前要求）
+
+### TFT (Temporal Fusion Transformer)
+- 论文: "Temporal Fusion Transformers for Interpretable Multi-horizon Time Series Forecasting" (Lim et al., 2021)
+- 开源实现参考: https://github.com/google-research/google-research/tree/master/tft
+- 本项目为自研轻量实现 (~128K参数): RevIN + LSTM Encoder/Decoder + Multi-head Attention + GRN
+- 从头训练，无预训练权重
+- 开源时间: 2021年（符合2026年4月1日前要求）
+
+### SpectralM (Spectral State Machine + AKRR)
+- 自研模块，包含四个子组件:
+  - HOAT (Higher-Order Autocorrelation Tensor): 高阶自相关张量提取
+  - VME (Volatility Manifold Embedding): 波动率流形嵌入
+  - SSM (Spectral State Machine): 谱聚类隐状态机
+  - AKRR (Adaptive Kernel Ridge Regression): 自适应核岭回归 + Nystrom加速
+- 无预训练权重
 
 ## 预训练模型使用说明
 
@@ -83,4 +92,4 @@
 
 ## 最后更新
 
-2026-04-22
+2026-05-12

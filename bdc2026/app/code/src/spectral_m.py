@@ -141,32 +141,61 @@ class SpectralStateMachine:
         return np.eye(A.shape[0]) - D_inv_sqrt @ A @ D_inv_sqrt
 
     def fit_predict(self, Z):
-        """谱聚类 → 隐状态标签 + 软概率"""
+        """谱聚类 → 隐状态标签 + 软概率
+
+        当 N > 5000 时先在随机子集上做谱聚类发现状态结构,
+        再将全量数据按最近状态中心分配。避免 N×N 相似度矩阵 OOM。
+        """
         n = Z.shape[0]
         if n < self.n_states * 2:
             return np.zeros(n, dtype=int), np.ones((n, self.n_states)) / self.n_states
 
-        A = self._build_adaptive_similarity(Z)
+        max_spec = 5000
+        if n > max_spec:
+            rng = np.random.RandomState(42)
+            sample_idx = rng.choice(n, max_spec, replace=False)
+            Z_spec = Z[sample_idx]
+        else:
+            Z_spec = Z
+            sample_idx = np.arange(n)
+
+        # 在子集上做谱聚类 → N×N 矩阵可控 (≤ 5000²)
+        A = self._build_adaptive_similarity(Z_spec)
         L = self._normalized_graph_laplacian(A)
 
         eigenvalues, eigenvectors = linalg.eigh(L)
         k_comp = min(self.n_states, eigenvectors.shape[1] - 1)
         spectral_embedding = eigenvectors[:, 1:k_comp+1]
 
-        _, labels, _ = k_means(spectral_embedding, n_clusters=self.n_states,
-                               init='k-means++', random_state=42, n_init=10)
+        _, labels_spec, _ = k_means(spectral_embedding, n_clusters=self.n_states,
+                                    init='k-means++', random_state=42, n_init=10)
+
+        # 状态中心 (原始特征空间)
+        self.state_centers = np.array([np.mean(Z_spec[labels_spec == c], axis=0)
+                                       for c in range(self.n_states)])
+
+        if n > max_spec:
+            # 全量分配: 每个点到最近状态中心
+            labels = np.zeros(n, dtype=int)
+            min_dist = np.full(n, np.inf)
+            for c in range(self.n_states):
+                dist = np.sum((Z - self.state_centers[c])**2, axis=1)
+                mask = dist < min_dist
+                labels[mask] = c
+                min_dist[mask] = dist[mask]
+        else:
+            labels = labels_spec
 
         self.state_labels = labels
-        self.state_centers = np.array([np.mean(Z[labels == c], axis=0) for c in range(self.n_states)])
 
-        # 转移矩阵
+        # 转移矩阵 (从全量标签估计)
         self.transition_matrix = np.zeros((self.n_states, self.n_states))
         for t in range(1, n):
             self.transition_matrix[labels[t-1], labels[t]] += 1
         row_sums = self.transition_matrix.sum(axis=1, keepdims=True)
         self.transition_matrix = np.where(row_sums > 0,
-                                         self.transition_matrix / row_sums,
-                                         np.eye(self.n_states)[labels[-1]])
+                                          self.transition_matrix / row_sums,
+                                          np.eye(self.n_states)[labels[-1]])
 
         # 软概率
         proba = np.zeros((n, self.n_states))
@@ -188,42 +217,113 @@ class SpectralStateMachine:
 
 
 class AKRRPredictor:
-    """自适应核岭回归 — 状态条件预测
+    """自适应核岭回归 — 状态条件预测 (Nyström 加速)
 
-    每个隐状态下训练独立的 KRR 模型, 使用马氏距离自适应核。
-    最终预测 = sum_c P(s_t=c) * f_c(z)。
-    比固定权重的 Stacking 更灵活。
+    每个隐状态下训练独立的 KRR 模型。
+    当样本数 > nystrom_threshold 时使用 Nyström 低秩近似,
+    将 N×N kernel 矩阵 (O(N²) 内存) 降为 N×m + m×m (O(Nm) 内存)。
+    近似误差受 kernel 矩阵第 (m+1) 大特征值控制, m=2000 时通常 <0.1%。
     """
-    def __init__(self, lambda_reg=1e-2, lambda_krr=1e-3):
+    def __init__(self, lambda_reg=1e-2, lambda_krr=1e-3, n_landmarks=2000):
         self.lambda_reg = lambda_reg
         self.lambda_krr = lambda_krr
+        self.n_landmarks = n_landmarks
         self.models = {}
 
     def fit(self, Z, y, state_labels, n_states):
         for c in range(n_states):
             mask = state_labels == c
-            if np.sum(mask) < 5:
+            n_c = np.sum(mask)
+            if n_c < 5:
                 continue
             Z_c = Z[mask]
             y_c = y[mask]
+
+            # 马氏度量矩阵
             Sigma_c = np.cov(Z_c.T)
             Sigma_reg = Sigma_c + self.lambda_reg * np.eye(Sigma_c.shape[0])
             try:
-                M_c = linalg.inv(Sigma_reg)
+                M_c = linalg.solve(Sigma_reg, np.eye(Sigma_c.shape[0]), assume_a='pos')
             except linalg.LinAlgError:
                 M_c = linalg.pinv(Sigma_reg)
-            # RBF kernel with Mahalanobis metric
-            XM = Z_c @ M_c
-            XX = np.sum(XM * Z_c, axis=1)
-            dist_sq = np.abs(XX[:, None] + XX[None, :] - 2 * (Z_c @ M_c @ Z_c.T))
+
             gamma = 1.0 / (2 * Z_c.shape[1])
-            K_c = np.exp(-gamma * dist_sq)
-            K_reg = K_c + self.lambda_krr * np.eye(K_c.shape[0])
-            try:
-                alpha_c = linalg.solve(K_reg, y_c, assume_a='pos')
-            except linalg.LinAlgError:
-                alpha_c = linalg.lstsq(K_reg, y_c)[0]
-            self.models[c] = {'alpha': alpha_c, 'Z_train': Z_c, 'M': M_c}
+
+            if n_c <= 3000:
+                # 小样本: 精确 KRR
+                alpha_c = self._exact_krr_fit(Z_c, y_c, M_c, gamma)
+                self.models[c] = {'alpha': alpha_c, 'Z_train': Z_c, 'M': M_c,
+                                  'gamma': gamma, 'nystrom': False}
+            else:
+                # 大样本: Nyström 近似
+                landmarks, beta = self._nystrom_krr_fit(Z_c, y_c, M_c, gamma)
+                self.models[c] = {'landmarks': landmarks, 'beta': beta, 'M': M_c,
+                                  'gamma': gamma, 'nystrom': True}
+
+    # ── 精确 KRR ──
+    def _exact_krr_fit(self, Z_c, y_c, M_c, gamma):
+        XM = Z_c @ M_c
+        XX = np.sum(XM * Z_c, axis=1)
+        dist_sq = np.abs(XX[:, None] + XX[None, :] - 2 * (Z_c @ M_c @ Z_c.T))
+        K_c = np.exp(-gamma * dist_sq)
+        K_reg = K_c + self.lambda_krr * np.eye(K_c.shape[0])
+        try:
+            return linalg.solve(K_reg, y_c, assume_a='pos')
+        except linalg.LinAlgError:
+            return linalg.lstsq(K_reg, y_c)[0]
+
+    # ── Nyström KRR ──
+    def _nystrom_krr_fit(self, Z_c, y_c, M_c, gamma):
+        """Nyström 加速 KRR 训练
+
+        核心推导:
+          K ≈ K_nm @ K_mm^{-1} @ K_nm^T = ΦΦ^T  (Φ = K_nm @ K_mm^{-1/2})
+          (K + λI)^{-1}y = λ^{-1}[y - K_nm @ β]
+          其中 β 满足: (λK_mm + K_nm^T K_nm) β = K_nm^T y
+
+        预测时: y_pred = K_test_nm @ β  (只需 N_test × m 内存)
+        """
+        from sklearn.cluster import MiniBatchKMeans
+        n, d = Z_c.shape
+        m = min(self.n_landmarks, n // 2)
+
+        # 选 landmark 点 (mini-batch k-means 质心)
+        if n > 8000:
+            rng = np.random.RandomState(42)
+            sample_idx = rng.choice(n, min(n, 5000), replace=False)
+            km = MiniBatchKMeans(n_clusters=m, random_state=42, batch_size=1024, n_init=1)
+            km.fit(Z_c[sample_idx])
+        else:
+            km = MiniBatchKMeans(n_clusters=m, random_state=42, batch_size=1024, n_init=1)
+            km.fit(Z_c)
+        landmarks = km.cluster_centers_  # (m, d)
+
+        # K_nm: kernel(所有训练点, landmarks)
+        K_nm = self._kernel(Z_c, landmarks, M_c, gamma)  # (n, m)
+
+        # K_mm: kernel(landmarks, landmarks)
+        K_mm = self._kernel(landmarks, landmarks, M_c, gamma)  # (m, m)
+
+        # 求解 β: (λK_mm + K_nm^T K_nm) β = K_nm^T y
+        LHS = self.lambda_krr * K_mm + K_nm.T @ K_nm  # (m, m)
+        RHS = K_nm.T @ y_c  # (m,)
+        try:
+            beta = linalg.solve(LHS, RHS, assume_a='pos')
+        except linalg.LinAlgError:
+            beta = linalg.lstsq(LHS, RHS)[0]
+
+        # α (用于兼容旧接口, 不存储大矩阵)
+        alpha_nystrom = (y_c - K_nm @ beta) / self.lambda_krr
+        return landmarks, beta
+
+    def _kernel(self, A, B, M_c, gamma):
+        """马氏-RBF 核: k(a,b) = exp(-γ * d_M(a,b)²)"""
+        XM = A @ M_c
+        YM = B @ M_c
+        XX = np.sum(XM * A, axis=1)
+        YY = np.sum(YM * B, axis=1)
+        dist_sq = np.abs(XX[:, None] + YY[None, :] - 2 * (A @ M_c @ B.T))
+        return np.exp(-gamma * dist_sq)
 
     def predict(self, Z, state_proba):
         if Z.ndim == 1:
@@ -231,17 +331,20 @@ class AKRRPredictor:
         n = Z.shape[0]
         predictions = np.zeros(n)
         for c, model in self.models.items():
-            Z_train = model['Z_train']
-            alpha = model['alpha']
             M_c = model['M']
-            XM = Z @ M_c
-            YM = Z_train @ M_c
-            XX = np.sum(XM * Z, axis=1)
-            YY = np.sum(YM * Z_train, axis=1)
-            dist_sq = np.abs(XX[:, None] + YY[None, :] - 2 * (Z @ M_c @ Z_train.T))
-            gamma = 1.0 / (2 * Z.shape[1])
-            K_test = np.exp(-gamma * dist_sq)
-            predictions += state_proba[:, c] * (K_test @ alpha)
+            gamma = model['gamma']
+            if model.get('nystrom', False):
+                # Nyström 预测: y_pred = K_test_nm @ β
+                landmarks = model['landmarks']
+                beta = model['beta']
+                K_test_nm = self._kernel(Z, landmarks, M_c, gamma)  # (n, m)
+                predictions += state_proba[:, c] * (K_test_nm @ beta)
+            else:
+                # 精确预测
+                Z_train = model['Z_train']
+                alpha = model['alpha']
+                K_test = self._kernel(Z, Z_train, M_c, gamma)  # (n, N_train)
+                predictions += state_proba[:, c] * (K_test @ alpha)
         return predictions
 
 

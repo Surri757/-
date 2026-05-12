@@ -40,15 +40,15 @@ from torch.utils.data import DataLoader
 
 sys.path.append(os.path.dirname(os.path.abspath(__file__)))
 from featurework import FeatureEngineering
-from train import (PatchTSTModel, DLinearModel, SequenceDataset,
-                   set_all_seeds, GBDT_N_ESTIMATORS, GBDT_LR, GBDT_MAX_DEPTH,
-                   D_MODEL, N_HEADS, E_LAYERS, PATCH_LEN, STRIDE, WeightedEnsemble)
+from train import (PatchTSTModel, DLinearModel, set_all_seeds,
+                   D_MODEL, N_HEADS, E_LAYERS, PATCH_LEN, STRIDE,
+                   WeightedEnsemble)  # WeightedEnsemble 为 pickle 反序列化 meta_model 必需
 from spectral_m import SpectralMEnsemble
 from tft_model import TFTModel
 from signals import SignalGenerator
-from gate import LiveGate
+from gate import LiveGate, detect_market_regime
 from risk_manager import RiskManager
-from executor import ExecutionSimulator
+from executor import ExecutionSimulator, ExecutionRecord
 from review import ReviewLayer
 from portfolio_optimizer import PortfolioOptimizer
 from cascade_pipeline import CascadePipeline
@@ -295,68 +295,24 @@ def get_industry(stock_id):
     return '其他'
 
 
-class MarketRegime:
-    """市场状态检测器 — 影响止损宽度
-
-    牛市放宽止损让利润奔跑，恐慌收紧止损快速截断亏损。
-    """
-
-    @staticmethod
-    def detect(index_returns, predicted_returns):
-        """
-        Returns: (regime, sl_multiplier)
-        regime: 'bull' | 'sideways' | 'bear' | 'panic' | 'neutral'
-        sl_multiplier: 止损宽度乘数 (牛1.5 / 震荡1.0 / 熊0.8 / 恐慌0.7)
-        """
-        if index_returns is None or len(index_returns) < 20:
-            return 'neutral', 1.0
-
-        ret_20d = np.mean(index_returns[-20:])
-        ret_5d = np.mean(index_returns[-5:])
-        ret_60d = np.mean(index_returns[-60:]) if len(index_returns) >= 60 else ret_20d
-        vol_20d = np.std(index_returns[-20:])
-        vol_60d = np.std(index_returns[-60:]) if len(index_returns) >= 60 else vol_20d
-        vol_change = vol_20d / (vol_60d + 1e-8)
-
-        pred_mean = np.mean(predicted_returns) if len(predicted_returns) > 0 else 0
-        pred_std = np.std(predicted_returns) if len(predicted_returns) > 0 else 0.02
-        pred_pos_ratio = np.mean(predicted_returns > 0) if len(predicted_returns) > 0 else 0.5
-        pred_sharpe = pred_mean / (pred_std + 1e-8)
-
-        # 趋势信号
-        trend_5d = np.clip(ret_5d / 0.03, -1, 1)
-        trend_20d = np.clip(ret_20d / 0.05, -1, 1)
-        trend_60d = np.clip(ret_60d / 0.08, -1, 1)
-        trend_score = 0.3 * trend_5d + 0.4 * trend_20d + 0.3 * trend_60d
-
-        # 波动率
-        vol_penalty = np.clip(vol_change - 0.8, 0, 1) * 0.3 + np.clip(vol_20d / 0.025 - 0.5, 0, 1) * 0.3
-        vol_score = 1.0 - np.clip(vol_penalty, 0, 0.6)
-
-        # 预测质量
-        pred_score = np.clip(pred_sharpe / 2.0 + 0.5, 0.2, 1.0)
-        pred_score *= (0.5 + 0.5 * pred_pos_ratio)
-
-        # 市场状态识别
-        if ret_5d < -0.03 and vol_change > 1.5:
-            regime = 'panic'
-        elif ret_20d < -0.01 and vol_change > 1.2:
-            regime = 'bear'
-        elif ret_20d > 0.01:
-            regime = 'bull'
-        elif abs(ret_20d) < 0.003:
-            regime = 'sideways'
-        else:
-            regime = 'neutral'
-
-        # 止损宽度乘数
-        sl_map = {'bull': 1.5, 'sideways': 1.0, 'neutral': 1.0, 'bear': 0.8, 'panic': 0.7}
-        sl_multiplier = sl_map.get(regime, 1.0)
-
-        print(f"[市场状态] {regime} | 趋势分={trend_score:.2f} 波动分={vol_score:.2f} 预测分={pred_score:.2f}")
-        print(f"  止损乘数={sl_multiplier:.1f}x  Sharpe={pred_sharpe:.2f}  正向率={pred_pos_ratio:.1%}")
-
-        return regime, sl_multiplier
+def _infer_n_features(state_dict, model_name):
+    """从保存的 state_dict 推断特征维度"""
+    # 按模型类型尝试不同的 key
+    key_candidates = {
+        'patchtst': ['revin.gamma', 'patch_embed.weight'],
+        'dlinear': ['revin.gamma', 'trend_linear.0.weight'],
+        'tft': ['feature_proj.weight', 'input_proj.weight'],
+    }
+    for key in key_candidates.get(model_name, []):
+        tensor = state_dict.get(key)
+        if tensor is not None:
+            return tensor.shape[-1] if tensor.dim() > 1 else tensor.shape[0]
+    # 回退: 扫描所有 keys
+    for k, v in state_dict.items():
+        if 'gamma' in k or 'proj' in k or 'embed' in k:
+            if v.dim() >= 2:
+                return v.shape[-1]
+    return 100  # 最终回退
 
 
 class StackingPredictor:
@@ -381,46 +337,37 @@ class StackingPredictor:
                 self.model_names.append(name)
                 print(f"  加载 {name}")
 
-        # PyTorch模型
-        pt_models = {
-            'patchtst': PatchTSTModel(seq_len=SEQ_LEN, n_features=100, d_model=D_MODEL,
-                                     n_heads=N_HEADS, e_layers=E_LAYERS),
-            'dlinear': DLinearModel(seq_len=SEQ_LEN, n_features=100),
-            'tft': TFTModel(seq_len=SEQ_LEN, n_features=100, d_model=D_MODEL,
-                            n_heads=2, lstm_hidden=48, dropout=0.1),
+        # PyTorch模型 — 从 state_dict 推断特征维度再构建
+        pt_model_configs = {
+            'patchtst': lambda nf: PatchTSTModel(seq_len=SEQ_LEN, n_features=nf, d_model=D_MODEL,
+                                                 n_heads=N_HEADS, e_layers=E_LAYERS),
+            'dlinear': lambda nf: DLinearModel(seq_len=SEQ_LEN, n_features=nf),
+            'tft': lambda nf: TFTModel(seq_len=SEQ_LEN, n_features=nf, d_model=D_MODEL,
+                                       n_heads=4, lstm_hidden=64, dropout=0.1),
         }
 
-        for name, model in pt_models.items():
+        for name, model_fn in pt_model_configs.items():
             fpath = os.path.join(MODEL_DIR, f'{name}_model.pth')
             if os.path.exists(fpath):
                 state = torch.load(fpath, map_location=self.device)
-                # 如果特征数不匹配，重建模型
-                try:
-                    model.load_state_dict(state)
-                except RuntimeError:
-                    # 推断实际特征数
-                    key_shape = state.get('revin.gamma', state.get('feature_proj.weight', state.get('gamma')))
-                    if key_shape is not None:
-                        n_feat = key_shape.shape[-1] if key_shape.dim() > 1 else key_shape.shape[0]
-                        print(f"  重建 {name} (n_features={n_feat})")
-                        if name == 'patchtst':
-                            model = PatchTSTModel(seq_len=SEQ_LEN, n_features=n_feat, d_model=D_MODEL,
-                                                 n_heads=N_HEADS, e_layers=E_LAYERS)
-                        elif name == 'dlinear':
-                            model = DLinearModel(seq_len=SEQ_LEN, n_features=n_feat)
-                        elif name == 'tft':
-                            model = TFTModel(seq_len=SEQ_LEN, n_features=n_feat, d_model=D_MODEL,
-                                             n_heads=4, lstm_hidden=64, dropout=0.1)
-                        model.load_state_dict(state)
+                # 从 state_dict 推断实际特征维度
+                n_feat = _infer_n_features(state, name)
+                model = model_fn(n_feat)
+                model.load_state_dict(state)
                 model.to(self.device)
                 model.eval()
                 self.base_models[name] = model
                 self.model_names.append(name)
-                print(f"  加载 {name}")
+                print(f"  加载 {name} (n_features={n_feat})")
 
         # 元模型
         meta_path = os.path.join(MODEL_DIR, 'meta_model.pkl')
         if os.path.exists(meta_path):
+            # 兼容旧 pickle (__main__.WeightedEnsemble) 和新 pickle (train.WeightedEnsemble)
+            import __main__
+            import train as _train_module
+            if not hasattr(__main__, 'WeightedEnsemble'):
+                setattr(__main__, 'WeightedEnsemble', _train_module.WeightedEnsemble)
             with open(meta_path, 'rb') as f:
                 self.meta_model = pickle.load(f)
             print("  加载元模型")
@@ -447,12 +394,17 @@ class StackingPredictor:
 
         for idx, name in enumerate(self.model_names):
             model = self.base_models[name]
-            if name in ['lightgbm', 'catboost', 'xgboost', 'spectralm']:
+            if name == 'spectralm':
+                # SpectralM 使用 per-stock returns 预测, 不用特征矩阵
+                if historical_prices is not None and len(historical_prices) >= 90:
+                    returns = np.diff(np.log(np.asarray(historical_prices) + 1e-10))
+                    base_preds[-1, idx] = model.predict_one(returns)
+            elif name in ['lightgbm', 'catboost', 'xgboost']:
                 base_preds[:, idx] = model.predict(X_scaled)
             else:
                 # PyTorch模型
                 X_seq = []
-                for i in range(SEQ_LEN, len(X_scaled)):
+                for i in range(SEQ_LEN, len(X_scaled) + 1):
                     X_seq.append(X_scaled[i - SEQ_LEN:i])
                 if len(X_seq) > 0:
                     X_tensor = torch.FloatTensor(np.array(X_seq)).to(self.device)
@@ -571,12 +523,9 @@ def main(mode='cascade'):
     print(f"测试数据: {len(df)} 条记录, {df['stock_id'].nunique()} 只股票")
 
     # 宏观和行业数据
-    from data_fetcher import (generate_macro_data, generate_industry_data,
-                              download_akshare_macro_data)
-    macro_df = download_akshare_macro_data()
-    if macro_df is None:
-        macro_df = generate_macro_data()
-    industry_df = generate_industry_data()
+    from data_fetcher import load_macro_data, load_industry_data
+    macro_df = load_macro_data()
+    industry_df = load_industry_data()
 
     # ── 3. 初始化各层 ──
     fe = FeatureEngineering()
@@ -595,7 +544,8 @@ def main(mode='cascade'):
 
     # 信号生成
     signal_gen = SignalGenerator(predictor, fe, industry_df, macro_df,
-                                 seq_len=SEQ_LEN, sl_atr_multiplier=SL_ATR_MULTIPLIER)
+                                 seq_len=SEQ_LEN, sl_atr_multiplier=SL_ATR_MULTIPLIER,
+                                 stock_industry_map=STOCK_INDUSTRY_MAP)
 
     print("\n生成交易信号...")
     signals = signal_gen.generate_all(df, stock_ids)
@@ -607,7 +557,11 @@ def main(mode='cascade'):
 
     # 市场状态 → 止损宽度调整
     pred_returns = np.array([s.predicted_return for s in signals])
-    regime, sl_multiplier = MarketRegime.detect(index_returns, pred_returns)
+    regime, scores = detect_market_regime(index_returns, pred_returns)
+    sl_map = {'bull': 1.5, 'sideways': 1.0, 'neutral': 1.0, 'bear': 0.8, 'panic': 0.7}
+    sl_multiplier = sl_map.get(regime, 1.0)
+    print(f"[市场状态] {regime} | 趋势分={scores['trend']:.2f} 波动分={scores['vol']:.2f} 预测分={scores['pred']:.2f}")
+    print(f"  止损乘数={sl_multiplier:.1f}x  Sharpe={scores['sharpe']:.2f}  正向率={scores['pos_ratio']:.1%}")
     for s in signals:
         entry = s.entry_price
         base_sl_dist = entry - s.stop_loss_price
@@ -673,7 +627,7 @@ def _run_simple(df, signals, predictor, fe, index_returns, pred_returns, sl_mult
         Sigma = PortfolioOptimizer.estimate_covariance_from_signals(candidates)
 
     weights, sel_indices, opt_info = optimizer.optimize(
-        mu, Sigma, method='max_sharpe', max_weight_sum=1.0,
+        mu, Sigma, method='pred_weighted', max_weight_sum=1.0,
         max_single=1.0, max_positions=5
     )
     print(f"[组合优化] {opt_info['method']} | 候选{opt_info['n_candidates']}只 → "
@@ -781,7 +735,9 @@ def _run_cascade(df, signals, predictor, fe, industry_df, macro_df,
             cluster_col = np.full((len(X), 1), cluster_id, dtype=np.float32)
             X_with_cluster = np.column_stack([X, cluster_col])
 
-            ensemble_pred, ensemble_std = predictor.predict(X_with_cluster)
+            ensemble_pred, ensemble_std = predictor.predict(
+                X_with_cluster,
+                historical_prices=stock_data['close'].values if 'close' in stock_data.columns else None)
             mu.append(float(ensemble_pred))
         except Exception:
             mu.append(s.predicted_return)
@@ -809,7 +765,7 @@ def _run_cascade(df, signals, predictor, fe, industry_df, macro_df,
 
     # 组合优化
     weights, sel_indices, opt_info = optimizer.optimize(
-        mu, Sigma, method='max_sharpe', max_weight_sum=1.0,
+        mu, Sigma, method='pred_weighted', max_weight_sum=1.0,
         max_single=1.0, max_positions=5
     )
     print(f"[决赛] {opt_info['method']} | 候选{opt_info['n_candidates']}只 → "

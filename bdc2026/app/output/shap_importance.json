@@ -1,0 +1,84 @@
+{
+  "top_20": [
+    {
+      "feature": "return_120d",
+      "shap_importance": 0.0019256966281507402
+    },
+    {
+      "feature": "return_std_60",
+      "shap_importance": 0.0007634191055607779
+    },
+    {
+      "feature": "macro_m2_yoy",
+      "shap_importance": 0.0006698400655896592
+    },
+    {
+      "feature": "industry_pe_percentile",
+      "shap_importance": 0.0005386100485695824
+    },
+    {
+      "feature": "volatility_cluster",
+      "shap_importance": 0.0005285159062298669
+    },
+    {
+      "feature": "ma_ratio_120",
+      "shap_importance": 0.0005240922313113934
+    },
+    {
+      "feature": "ma_ratio_60",
+      "shap_importance": 0.0003921752377594459
+    },
+    {
+      "feature": "industry_pb",
+      "shap_importance": 0.0003409262149100858
+    },
+    {
+      "feature": "avg_turnover_20",
+      "shap_importance": 0.00020642235046799596
+    },
+    {
+      "feature": "industry_pe",
+      "shap_importance": 0.00018305278353203977
+    },
+    {
+      "feature": "macro_pmi",
+      "shap_importance": 0.00016541373374108771
+    },
+    {
+      "feature": "macro_m2",
+      "shap_importance": 9.497803972879644e-05
+    },
+    {
+      "feature": "industry_pb_percentile",
+      "shap_importance": 8.540547162728729e-05
+    },
+    {
+      "feature": "return_std_20",
+      "shap_importance": 8.513017656047587e-05
+    },
+    {
+      "feature": "roc_24",
+      "shap_importance": 8.320568606685219e-05
+    },
+    {
+      "feature": "macro_cpi",
+      "shap_importance": 7.656192030702106e-05
+    },
+    {
+      "feature": "anchoring_gap",
+      "shap_importance": 7.471018210360597e-05
+    },
+    {
+      "feature": "pe_percentile",
+      "shap_importance": 6.791055679750064e-05
+    },
+    {
+      "feature": "industry_turnover",
+      "shap_importance": 5.966608603409168e-05
+    },
+    {
+      "feature": "return_60d",
+      "shap_importance": 4.6277900643019024e-05
+    }
+  ]
+}

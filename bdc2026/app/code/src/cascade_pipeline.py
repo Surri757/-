@@ -3,7 +3,7 @@
 
 Stage 1 (粗筛): 300 → ~150, 组内不同模型打分
 Stage 2 (精选): ~150 → ~45, 换一套模型重新打分
-复活赛:         淘汰池 → 最多 5 只, TFT+TimesNet 救回
+复活赛:         淘汰池 → 最多 5 只, TFT+DLinear 救回
 Stage 3 (决赛): ~50 → 5, 全量 7 模型 Stacking + 组合优化
 
 核心理念: 不同阶段的模型组合不同，避免单一模型偏见。
@@ -15,6 +15,19 @@ from dataclasses import dataclass, field
 from typing import List, Dict, Optional, Tuple
 from collections import defaultdict
 from tqdm import tqdm
+
+
+def _add_volatility_cluster(X_raw, close_prices):
+    """为特征矩阵添加波动率聚类列，匹配训练时的 scaler 维度"""
+    from train import compute_volatility_cluster
+    if close_prices is not None:
+        if not isinstance(close_prices, pd.Series):
+            close_prices = pd.Series(close_prices.flatten())
+        cluster_id = compute_volatility_cluster(close_prices)
+    else:
+        cluster_id = 1
+    cluster_col = np.full((len(X_raw), 1), cluster_id, dtype=np.float32)
+    return np.column_stack([X_raw, cluster_col])
 
 
 # ═══════════════════════════════════════════════
@@ -31,8 +44,8 @@ BALLAST_BLACKLIST = {
     '002839', '600908', '002948',            # 张家港/无锡/青岛
     '601328', '601658', '601838', '601077',  # 交通/邮储/成都/渝农
     '601528', '600928', '601825', '601860',  # 瑞丰/西安/上海农商/紫金
-    '601963', '002936', '600015', '601916',  # 重庆/郑州/华夏/浙商
-    '601187', '600036', '601995',            # 厦门/招商(重)/中金
+    '601963', '002936', '601916',             # 重庆/郑州/浙商
+    '601187', '601995',                       # 厦门/中金
     # ── 石油石化+能源 (传统权重) ──
     '601857', '600028', '600938', '601088',  # 中国石油/中国石化/中国海油/中国神华
     '601808', '600968',                       # 中海油服/海油发展
@@ -41,7 +54,7 @@ BALLAST_BLACKLIST = {
     # ── 电力公用事业 (常年横盘稳分红) ──
     '600900', '601985', '600886', '600674',  # 长江电力/中国核电/国投电力/川投能源
     '600025', '600023', '600011', '600027',  # 华能水电/浙能电力/华能国际/华电国际
-    '601991', '600795', '600886',            # 大唐发电/国电电力
+    '601991', '600795',                       # 大唐发电/国电电力
     '003816', '000883', '000027',            # 中国广核/湖北能源/深圳能源
     # ── 老牌保险 ──
     '601318', '601628', '601336', '601601',  # 中国平安/中国人寿/新华保险/中国太保
@@ -285,40 +298,44 @@ class ResurrectionJudge:
         self.fe = feature_eng
         self.seq_len = seq_len
 
-    def evaluate(self, eliminated_signals, stock_df, max_rescue=5):
+    def evaluate(self, eliminated_signals, stock_df, max_rescue=5, feature_cache=None):
         """对淘汰池中的股票重新打分，选出复活者
 
         Args:
             eliminated_signals: 被淘汰的 StockSignal 列表
             stock_df: 完整股票数据
             max_rescue: 最多复活数量
+            feature_cache: 可选的预计算特征缓存 {stock_id: X_array}
 
         Returns:
             rescued_signals: 复活成功的信号列表
         """
         if len(eliminated_signals) <= max_rescue:
-            return eliminated_signals  # 淘汰池太小，全复活
+            return eliminated_signals
 
         resurrection_models = StageConfig.RESURRECTION_MODELS
         scores = []
 
         for signal in tqdm(eliminated_signals, desc="  复活评审", unit="stock", leave=False):
-            # 为每只股票单独打分
-            stock_data = stock_df[
-                stock_df['stock_id'].astype(str).str.zfill(6) == signal.stock_id
-            ].sort_values('date').set_index('date')
+            sid = signal.stock_id
 
-            if len(stock_data) < self.seq_len:
-                scores.append((signal, 0.0))
-                continue
+            # 优先用缓存特征
+            if feature_cache and sid in feature_cache:
+                X = feature_cache[sid]
+            else:
+                stock_data = stock_df[
+                    stock_df['stock_id'].astype(str).str.zfill(6) == sid
+                ].sort_values('date').set_index('date')
+                if len(stock_data) < self.seq_len:
+                    scores.append((signal, 0.0))
+                    continue
+                features = self.fe.build_all_features(stock_data, None, None)
+                features = self.fe.remove_outliers(features)
+                last_features = features.iloc[-self.seq_len:].fillna(0)
+                X_raw = last_features.values.astype(np.float32)
+                close_prices = stock_data['close'].values if 'close' in stock_data.columns else None
+                X = _add_volatility_cluster(X_raw, close_prices)
 
-            # 特征工程
-            features = self.fe.build_all_features(stock_data, None, None)
-            features = self.fe.remove_outliers(features)
-            last_features = features.iloc[-self.seq_len:].fillna(0)
-            X = last_features.values.astype(np.float32)
-
-            # 用复活赛 DL 模型打分
             model_preds = []
             for model_name in resurrection_models:
                 try:
@@ -331,15 +348,11 @@ class ResurrectionJudge:
                 scores.append((signal, 0.0))
                 continue
 
-            # 复活分 = 模型预测均值
             rescue_score = float(np.mean(model_preds))
-            # 加分项: 如果 DL 预测远高于信号原始 prediction（树模型低估）
             boost = max(0, rescue_score - signal.predicted_return)
             rescue_score += boost * 0.5
-
             scores.append((signal, rescue_score))
 
-        # 按复活分降序，取 top max_rescue
         scores.sort(key=lambda x: x[1], reverse=True)
         rescued = [s for s, sc in scores[:max_rescue] if sc > 0.0]
 
@@ -475,6 +488,8 @@ class CascadePipeline:
         self.grouper = None
         self.resurrection = ResurrectionJudge(predictor, feature_eng, seq_len)
         self.results: List[StageResult] = []
+        self._feature_cache: Dict[str, np.ndarray] = {}  # stock_id → X array (with cluster col)
+        self._close_cache: Dict[str, np.ndarray] = {}    # stock_id → close prices
 
     def run(self, signals, stock_df, verbose=True):
         """执行完整的多层筛选流水线
@@ -489,6 +504,10 @@ class CascadePipeline:
         """
         if len(signals) < 10:
             return signals, []
+
+        # ── 预计算: 为所有股票构建特征缓存 (避免各阶段重复计算) ──
+        all_stock_ids = list(set(s.stock_id for s in signals))
+        self._build_feature_cache(all_stock_ids, stock_df, verbose)
 
         # ── 永久黑名单: 压舱石直接淘汰，不可复活 ──
         non_ballast = []
@@ -568,9 +587,10 @@ class CascadePipeline:
 
         if verbose:
             print(f"\n{'='*50}")
-            print(f"复活赛: 淘汰池 {len(eliminated_unique)} 只 → TFT+TimesNet 救回 ≤5 只")
+            print(f"复活赛: 淘汰池 {len(eliminated_unique)} 只 → TFT+DLinear 救回 ≤5 只")
             print(f"{'='*50}")
-        rescued = self.resurrection.evaluate(eliminated_unique, stock_df, max_rescue=5)
+        rescued = self.resurrection.evaluate(eliminated_unique, stock_df, max_rescue=5,
+                                               feature_cache=self._feature_cache)
 
         # ── 决赛候选 ──
         final_candidates = list(survivors) + rescued
@@ -676,23 +696,35 @@ class CascadePipeline:
             group_scores=all_scores,
         )
 
+    def _build_feature_cache(self, stock_ids, stock_df, verbose):
+        """预计算所有股票的特征矩阵，避免各阶段重复计算"""
+        if verbose:
+            print(f"[特征缓存] 预计算 {len(stock_ids)} 只股票特征...")
+        for sid in tqdm(stock_ids, desc="  特征预计算", unit="stock", leave=False):
+            try:
+                stock_data = stock_df[
+                    stock_df['stock_id'].astype(str).str.zfill(6) == sid
+                ].sort_values('date').set_index('date')
+                if len(stock_data) < self.seq_len:
+                    continue
+                features = self.fe.build_all_features(stock_data, self.industry_df, self.macro_df)
+                features = self.fe.remove_outliers(features)
+                last_features = features.iloc[-self.seq_len:].fillna(0)
+                X_raw = last_features.values.astype(np.float32)
+                close_prices = stock_data['close'].values if 'close' in stock_data.columns else None
+                self._feature_cache[sid] = _add_volatility_cluster(X_raw, close_prices)
+                self._close_cache[sid] = close_prices
+            except Exception:
+                continue
+        if verbose:
+            print(f"  特征缓存完成: {len(self._feature_cache)} 只")
+
     def _score_with_models(self, signal, stock_df, model_names):
-        """用指定模型组合给单只股票打分
-
-        Returns:
-            综合得分（模型预测均值）
-        """
-        stock_data = stock_df[
-            stock_df['stock_id'].astype(str).str.zfill(6) == signal.stock_id
-        ].sort_values('date').set_index('date')
-
-        if len(stock_data) < self.seq_len:
-            return signal.predicted_return  # 数据不足，用原始预测
-
-        features = self.fe.build_all_features(stock_data, self.industry_df, self.macro_df)
-        features = self.fe.remove_outliers(features)
-        last_features = features.iloc[-self.seq_len:].fillna(0)
-        X = last_features.values.astype(np.float32)
+        """用指定模型组合给单只股票打分（使用预计算的缓存特征）"""
+        sid = signal.stock_id
+        X = self._feature_cache.get(sid)
+        if X is None:
+            return signal.predicted_return
 
         preds = []
         for model_name in model_names:
@@ -702,13 +734,11 @@ class CascadePipeline:
                     continue
 
                 if model_name in ['lightgbm', 'catboost', 'xgboost', 'spectralm']:
-                    # GBDT: 用最后一行特征
                     X_scaled = self.predictor.scaler.transform(
                         X[-1:].reshape(1, -1)
                     ) if self.predictor.scaler else X[-1:].reshape(1, -1)
                     p = float(model.predict(X_scaled)[0])
                 else:
-                    # PyTorch: 用完整时序
                     X_t = np.expand_dims(X, axis=0).astype(np.float32)
                     if self.predictor.scaler:
                         X_t = np.array([

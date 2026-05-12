@@ -1,0 +1,50 @@
+{
+  "attribution": {
+    "total_predicted_return": 0.043996835209433066,
+    "n_stocks": 5,
+    "win_rate": 1.0,
+    "max_weight": 0.6538575811515169,
+    "min_weight": 0.07684286360558969,
+    "total_exposure": 1.0,
+    "best_stock": {
+      "stock_id": "300782",
+      "predicted_return": 0.04991114167897303,
+      "weight": 0.6538575811515169
+    },
+    "worst_stock": {
+      "stock_id": "002916",
+      "predicted_return": 0.03177999883851756,
+      "weight": 0.07684286360558969
+    }
+  },
+  "rejections": 8,
+  "executions": 0,
+  "risk_events": 0,
+  "predictions": [
+    {
+      "stock_id": "002916",
+      "predicted_return": 0.03177999883851756,
+      "weight": 0.07684286360558969
+    },
+    {
+      "stock_id": "002475",
+      "predicted_return": 0.03211194076014614,
+      "weight": 0.07991487434755506
+    },
+    {
+      "stock_id": "300866",
+      "predicted_return": 0.03343017136125025,
+      "weight": 0.09337590402479476
+    },
+    {
+      "stock_id": "300661",
+      "predicted_return": 0.03366563604356271,
+      "weight": 0.0960087768705436
+    },
+    {
+      "stock_id": "300782",
+      "predicted_return": 0.04991114167897303,
+      "weight": 0.6538575811515169
+    }
+  ]
+}

@@ -23,7 +23,8 @@ class PortfolioOptimizer:
     # ── 公共接口 ──
 
     def optimize(self, mu, Sigma, method='max_sharpe', max_weight_sum=1.0,
-                 max_single=1.0, max_positions=5, risk_budget=0.01):
+                 max_single=1.0, max_positions=5, risk_budget=0.01,
+                 temperature=None):
         """优化组合权重
 
         Args:
@@ -55,6 +56,8 @@ class PortfolioOptimizer:
             w_opt = self._optimize_max_return_risk_budget(
                 mu, Sigma, max_weight_sum, max_single, risk_budget
             )
+        elif method == 'pred_weighted':
+            w_opt = self._optimize_pred_weighted(mu, max_weight_sum, max_single, temperature)
         else:
             raise ValueError(f"Unknown method: {method}")
 
@@ -154,6 +157,30 @@ class PortfolioOptimizer:
             return w0
 
         return np.maximum(result.x, 0.0)
+
+    def _optimize_pred_weighted(self, mu, max_weight_sum, max_single, temperature=None):
+        """信念加权: w_i ∝ exp(mu_i / T)
+
+        温度自适应: T = std(mu) × 1.0, 下限 0.004
+        - 收益率聚类越紧 → T 越小 → 排名靠前的权重越突出
+        - 收益率差异大  → T 越大 → 自然拉开差距
+        - #1 / #5 权重比约 3-6x, 体现"越看好越重仓"
+        """
+        n = len(mu)
+        if temperature is None:
+            mu_std = float(np.std(mu))
+            temperature = max(mu_std * 1.0, 0.004)
+        scores = np.exp(mu / max(temperature, 0.001))
+        # 迭代投影: clip → renormalize, 直到所有权重 ≤ max_single
+        w = scores / scores.sum() * max_weight_sum
+        for _ in range(5):
+            w = np.minimum(w, max_single)
+            if w.sum() <= 0:
+                break
+            w = w / w.sum() * max_weight_sum
+            if (w <= max_single + 1e-8).all():
+                break
+        return w
 
     # ── 后处理 ──
 
