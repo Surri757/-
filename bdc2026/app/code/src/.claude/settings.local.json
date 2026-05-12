@@ -14,7 +14,10 @@
       "Bash(python -c \"import py_compile; py_compile.compile\\('train.py', doraise=True\\); print\\('train.py OK'\\)\")",
       "Bash(python -c \"import py_compile; py_compile.compile\\('featurework.py', doraise=True\\); print\\('featurework.py OK'\\)\")",
       "Bash(python -c \"import py_compile; py_compile.compile\\('test.py', doraise=True\\); print\\('test.py OK'\\)\")",
-      "Bash(python -c \"from train import WeightedEnsemble; print\\('WeightedEnsemble imported OK'\\)\")"
+      "Bash(python -c \"from train import WeightedEnsemble; print\\('WeightedEnsemble imported OK'\\)\")",
+      "Bash(python *)",
+      "Bash(git checkout *)",
+      "Bash(git add *)"
     ]
   }
 }

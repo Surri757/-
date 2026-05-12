@@ -1062,8 +1062,6 @@ class StackingEnsemble:
                 torch.save(model.state_dict(), os.path.join(self.model_dir, f'{name}_model.pth'))
 
         if self.meta_model:
-            # 确保 pickle 在其他脚本加载时能找到正确模块路径
-            self.meta_model.__class__.__module__ = 'train'
             with open(os.path.join(self.model_dir, 'meta_model.pkl'), 'wb') as f:
                 pickle.dump(self.meta_model, f)
 

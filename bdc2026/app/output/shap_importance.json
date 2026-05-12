@@ -1,84 +1,84 @@
 {
   "top_20": [
     {
-      "feature": "return_120d",
-      "shap_importance": 0.0019256966281507402
-    },
-    {
-      "feature": "return_std_60",
-      "shap_importance": 0.0007634191055607779
-    },
-    {
-      "feature": "macro_m2_yoy",
-      "shap_importance": 0.0006698400655896592
-    },
-    {
-      "feature": "industry_pe_percentile",
-      "shap_importance": 0.0005386100485695824
+      "feature": "ma_ratio_120",
+      "shap_importance": 0.00019798247971956597
     },
     {
       "feature": "volatility_cluster",
-      "shap_importance": 0.0005285159062298669
+      "shap_importance": 0.00013160874156935515
     },
     {
-      "feature": "ma_ratio_120",
-      "shap_importance": 0.0005240922313113934
+      "feature": "macro_m2_yoy",
+      "shap_importance": 0.00012041326417333987
     },
     {
-      "feature": "ma_ratio_60",
-      "shap_importance": 0.0003921752377594459
+      "feature": "return_std_60",
+      "shap_importance": 7.910052404187406e-05
     },
     {
-      "feature": "industry_pb",
-      "shap_importance": 0.0003409262149100858
-    },
-    {
-      "feature": "avg_turnover_20",
-      "shap_importance": 0.00020642235046799596
-    },
-    {
-      "feature": "industry_pe",
-      "shap_importance": 0.00018305278353203977
-    },
-    {
-      "feature": "macro_pmi",
-      "shap_importance": 0.00016541373374108771
-    },
-    {
-      "feature": "macro_m2",
-      "shap_importance": 9.497803972879644e-05
-    },
-    {
-      "feature": "industry_pb_percentile",
-      "shap_importance": 8.540547162728729e-05
-    },
-    {
-      "feature": "return_std_20",
-      "shap_importance": 8.513017656047587e-05
-    },
-    {
-      "feature": "roc_24",
-      "shap_importance": 8.320568606685219e-05
-    },
-    {
-      "feature": "macro_cpi",
-      "shap_importance": 7.656192030702106e-05
-    },
-    {
-      "feature": "anchoring_gap",
-      "shap_importance": 7.471018210360597e-05
-    },
-    {
-      "feature": "pe_percentile",
-      "shap_importance": 6.791055679750064e-05
-    },
-    {
-      "feature": "industry_turnover",
-      "shap_importance": 5.966608603409168e-05
+      "feature": "industry_pe_percentile",
+      "shap_importance": 6.800290580608101e-05
     },
     {
       "feature": "return_60d",
-      "shap_importance": 4.6277900643019024e-05
+      "shap_importance": 3.564146922076759e-05
+    },
+    {
+      "feature": "industry_pb",
+      "shap_importance": 3.145952015019673e-05
+    },
+    {
+      "feature": "max_ret_20d",
+      "shap_importance": 2.9530697440100335e-05
+    },
+    {
+      "feature": "industry_pe",
+      "shap_importance": 2.0467745349448447e-05
+    },
+    {
+      "feature": "macro_cpi",
+      "shap_importance": 1.5385399068298205e-05
+    },
+    {
+      "feature": "industry_return",
+      "shap_importance": 1.4433634739325855e-05
+    },
+    {
+      "feature": "anchoring_gap",
+      "shap_importance": 1.0677197136113575e-05
+    },
+    {
+      "feature": "industry_pb_percentile",
+      "shap_importance": 9.563441067075365e-06
+    },
+    {
+      "feature": "rsi_24",
+      "shap_importance": 7.673717642984212e-06
+    },
+    {
+      "feature": "amount_ma_ratio_60",
+      "shap_importance": 7.276186761983552e-06
+    },
+    {
+      "feature": "return_10d",
+      "shap_importance": 6.9617416328422904e-06
+    },
+    {
+      "feature": "obv",
+      "shap_importance": 6.594497753979154e-06
+    },
+    {
+      "feature": "return_skew_20",
+      "shap_importance": 4.541365083468081e-06
+    },
+    {
+      "feature": "macd_signal",
+      "shap_importance": 3.024648162366182e-06
+    },
+    {
+      "feature": "earnings_season",
+      "shap_importance": 0.0
     }
   ]
 }

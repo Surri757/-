@@ -23,7 +23,29 @@
       "Bash(python -c \"import py_compile; py_compile.compile\\('train.py', doraise=True\\); print\\('OK'\\)\")",
       "Bash(python -c \"import py_compile; py_compile.compile\\('train.py', doraise=True\\); print\\('Syntax OK'\\)\")",
       "Bash(python -c \"import tqdm; print\\(f'tqdm {tqdm.__version__}'\\)\")",
-      "Bash(git checkout *)"
+      "Bash(git checkout *)",
+      "Bash(bash test.sh)",
+      "Bash(python src/test.py)",
+      "Bash(python -c \"import py_compile; py_compile.compile\\('src/train.py', doraise=True\\); print\\('OK'\\)\")",
+      "Bash(python src/train.py)",
+      "Bash(python -c \"import py_compile; py_compile.compile\\('src/train.py', doraise=True\\); py_compile.compile\\('src/spectral_m.py', doraise=True\\); print\\('OK'\\)\")",
+      "Bash(rm -rf D:/stockclone/bdc2026/app/code/src/__pycache__/spectral_m*.pyc)",
+      "Bash(python -c \"from spectral_m import AKRRPredictor; import inspect; print\\(inspect.getsource\\(AKRRPredictor.fit\\)\\)\")",
+      "Bash(rm -rf src/__pycache__/spectral_m*.pyc)",
+      "Bash(python -c \"import sys; sys.path.insert\\(0, 'src'\\); from spectral_m import AKRRPredictor; import inspect; src = inspect.getsource\\(AKRRPredictor.fit\\); print\\(src[:500]\\)\")",
+      "Bash(python -c \"import py_compile; py_compile.compile\\('src/spectral_m.py', doraise=True\\); py_compile.compile\\('src/train.py', doraise=True\\); print\\('OK'\\)\")",
+      "Bash(grep -E \"^\\\\[.*INFO.*\\(IC=|lightgbm$|catboost$|xgboost$|patchtst$|spectralm$|dlinear$|tft$|Stacking|训练完成|总耗时|IC优化|元模型|压缩|有效\\)\" \"C:/Users/38235/AppData/Local/Temp/claude/D--stockclone/3cfdaabf-2f50-45b6-b1c1-43afa1643c7f/tasks/bgoqvcl9t.output\")",
+      "Bash(tasklist)",
+      "Bash(taskkill /F /PID 42332)",
+      "Bash(taskkill /F /PID 41144)",
+      "Bash(nvidia-smi --query-gpu=memory.used,memory.free --format=csv,noheader)",
+      "Bash(taskkill /F /IM python.exe)",
+      "Bash(python -m py_compile bdc2026/app/code/src/train.py)",
+      "Bash(python -m py_compile bdc2026/app/code/src/test.py)",
+      "Bash(python -m py_compile bdc2026/app/code/src/gate.py)",
+      "Bash(python -m py_compile bdc2026/app/code/src/cascade_pipeline.py)",
+      "Bash(python -m py_compile bdc2026/app/code/src/portfolio_optimizer.py)",
+      "Bash(python -m py_compile bdc2026/app/code/src/data_fetcher.py)"
     ]
   }
 }
