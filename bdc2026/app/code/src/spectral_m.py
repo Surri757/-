@@ -51,7 +51,7 @@ class HOATExtractor:
         raw_features = np.array(raw_features, dtype=np.float32)
         raw_features = self.scaler.fit_transform(raw_features)
         n_comp = min(self.n_components, raw_features.shape[1])
-        pca = PCA(n_components=n_comp)
+        pca = PCA(n_components=n_comp, svd_solver='full')
         reduced = pca.fit_transform(raw_features).astype(np.float32)
         self._fitted = True
         return reduced, valid_indices
@@ -100,7 +100,7 @@ class VMEmbedder:
         raw_features = np.array(raw_features, dtype=np.float32)
         raw_features = self.scaler.fit_transform(raw_features)
         n_pca = min(self.n_components, raw_features.shape[1])
-        pca = PCA(n_components=n_pca)
+        pca = PCA(n_components=n_pca, svd_solver='full')
         return pca.fit_transform(raw_features).astype(np.float32), valid_indices
 
 

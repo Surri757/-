@@ -10,6 +10,7 @@ cd "$(dirname "$0")"
 
 start_time=$(date +%s)
 
+export PYTHONHASHSEED=42
 echo "开始训练..."
 python -u src/train.py
 

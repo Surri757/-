@@ -2,6 +2,8 @@
 训练主程序 - 7模型 Stacking 集成
 """
 import os
+# cuBLAS 确定性必须在 torch 首次 import 前设置
+os.environ['CUBLAS_WORKSPACE_CONFIG'] = ':4096:8'
 import sys
 import pickle
 import random
@@ -81,6 +83,7 @@ def set_all_seeds(seed=RANDOM_SEED):
             torch.cuda.manual_seed_all(seed)
             torch.backends.cudnn.deterministic = True
             torch.backends.cudnn.benchmark = False
+            torch.use_deterministic_algorithms(True, warn_only=True)
     except Exception:
         pass
     try:
@@ -392,7 +395,7 @@ class StackingEnsemble:
                 iterations=GBDT_N_ESTIMATORS, learning_rate=GBDT_LR,
                 depth=GBDT_MAX_DEPTH, random_state=RANDOM_SEED,
                 loss_function='RMSE',
-                verbose=0, task_type='GPU',
+                verbose=0, task_type='CPU',
                 early_stopping_rounds=GBDT_EARLY_STOP,
                 l2_leaf_reg=3, border_count=128,
                 boosting_type='Plain', bootstrap_type='Bernoulli',
@@ -830,7 +833,7 @@ class StackingEnsemble:
             return cb.CatBoostRegressor(
                 iterations=GBDT_N_ESTIMATORS, learning_rate=GBDT_LR,
                 depth=GBDT_MAX_DEPTH, random_state=RANDOM_SEED,
-                loss_function='RMSE', verbose=0, task_type=dt, boosting_type='Plain',
+                loss_function='RMSE', verbose=0, task_type='CPU', boosting_type='Plain',
                 bootstrap_type='Bernoulli', subsample=GBDT_SUBSAMPLE,
             )
         elif name == 'xgboost':

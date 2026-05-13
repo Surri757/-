@@ -10,6 +10,7 @@ cd "$(dirname "$0")"
 
 start_time=$(date +%s)
 
+export PYTHONHASHSEED=42
 echo "开始预测..."
 python -u src/test.py
 

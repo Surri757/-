@@ -2,16 +2,70 @@
 
 ## 环境配置
 
-- Python版本：3.10.14
-- PyTorch版本：2.2.1+cu121
-- CUDA版本：12.1
-- 硬件要求：i7-13650H + 16GB + RTX4060 8GB
+### 硬件
+- CPU：i7-13650H（14核20线程）
+- 内存：16GB
+- GPU：NVIDIA GeForce RTX 4060 Laptop 8GB（Ada Lovelace, Compute Capability 8.9）
+- 存储：50GB
+
+### 系统
+- OS：Ubuntu 22.04（Docker 基础镜像 `nvidia/cuda:12.1.0-cudnn8-runtime-ubuntu22.04`）
+- Python：3.10.14
+- CUDA：12.1
+- cuDNN：8
+
+### Python 依赖（精确版本，跨机器复现必须一致）
+
+```
+numpy==1.26.4
+pandas==2.2.2
+scikit-learn==1.5.0
+lightgbm==4.3.0
+catboost==1.2.5
+xgboost==2.0.3
+torch==2.2.1
+torchvision==0.17.1
+torchaudio==2.2.1
+scipy==1.13.1
+statsmodels==0.14.2
+matplotlib==3.8.5
+shap>=0.44.0
+tqdm
+```
+
 - 训练时间：约0.58小时（35分钟）
 - 预测时间：约2分钟
+- **跨机器复现前提：请确保上述 Python 依赖版本完全一致，否则 cuDNN/cuBLAS 底层实现和算法行为差异可能导致数值偏差**
 
 ## 可复现性保证
 
-所有随机种子固定为42（numpy / pandas / sklearn / lightgbm / xgboost / catboost / torch / cudnn / Python random / PYTHONHASHSEED）。
+**同一份代码 + 固定 seed=42 + 相同软件环境 → 任意机器上训练过程和推理结果位级一致。**
+
+### 确定性措施
+
+| 层级 | 措施 | 说明 |
+|------|------|------|
+| Python | `PYTHONHASHSEED=42` | 消除 dict/set 遍历顺序不确定性 |
+| NumPy/random | `np.random.seed(42)` + `random.seed(42)` | 所有随机数生成器固定 |
+| LightGBM | `random_state=42` | GBDT 分裂点固定 |
+| XGBoost | `random_state=42` + `tree_method='hist'` | GPU hist 在固定 seed 下可复现 |
+| CatBoost | `random_state=42` + **`task_type='CPU'`** | **GPU 原子操作不可控，必须 CPU** |
+| PyTorch | `torch.manual_seed(42)` + `cuda.manual_seed_all(42)` | 权重初始化固定 |
+| cuDNN | `cudnn.deterministic=True` + `cudnn.benchmark=False` | 禁用启发式算法选择 |
+| cuBLAS | `CUBLAS_WORKSPACE_CONFIG=:4096:8` | 固定矩阵乘法累加顺序（import torch 前设置） |
+| CUDA 算子 | `torch.use_deterministic_algorithms(True, warn_only=True)` | 强制 scatter/index_add 等走确定性路径 |
+| sklearn PCA | `svd_solver='full'` | 禁用 randomized SVD，避免非确定性 |
+| sklearn KMeans | `random_state=42` + `n_init=10` | 聚类中心固定 |
+| DataLoader | `shuffle=False` + `num_workers=0` | 数据顺序固定，无子进程随机 |
+| 数据 | 本地 CSV 缓存，离线运行 | 相同文件 → 相同输入 |
+
+### 跨机器一致性前提
+
+- 同一份代码和 `data/` 目录下的 CSV 缓存文件
+- 相同的 PyTorch/CUDA/cuDNN 版本（见[环境配置](#环境配置)）
+- 相同的 GPU 架构（Ada Lovelace / RTX 4060）
+
+满足以上条件时，训练过程（loss 曲线、模型权重）和推理结果（result.csv）与提交结果位级一致。
 
 ## 数据来源
 
@@ -39,7 +93,7 @@
 |------|------|--------|--------|---------|------|
 | XGBoost | GBDT | 500树×6层 | 0.419 | 主力 | 排序信号 |
 | LightGBM | GBDT | 500树×6层 | 0.394 | 主力 | 排序信号 |
-| CatBoost | GBDT | 500树×6层 | 0.333 | 辅助 | 排序信号 |
+| CatBoost | GBDT (CPU) | 500树×6层 | 0.333 | 辅助 | 排序信号（CPU训练保证可复现） |
 | PatchTST | Patch+Transformer | ~500K | 0.258 | 补充 | 时序模式 |
 | DLinear | 线性趋势分解 | ~50K | 0.354 | 补充 | 复活赛裁判 |
 | TFT | LSTM+Attention+GRN | ~128K | 0.297 | 补充 | 复活赛裁判 |
@@ -96,7 +150,7 @@
 ```
 300只信号
   ├─ [特征缓存] 预计算所有股票特征矩阵（避免各阶段重复计算）
-  ├─ [永久黑名单] ~84只压舱石（银行/石油/保险/运营商/基建/公用事业）→ 直接淘汰
+  ├─ [永久黑名单] 87只压舱石（银行/石油/保险/运营商/基建/公用事业）→ 直接淘汰
   ├─ [动态活跃度] 30日成交量<历史60%的票 → 暂时拉黑（放量可复活）
   ├─ [因子画像分组] 波动率×动量×估值 → 6-8组
   ├─ [Stage 1 粗筛] 各组用不同模型打分 → z-score排名 → 收益下限0.8% → 保留~50%
@@ -166,7 +220,7 @@
 1. 加载365天动态数据，排除最近30个交易日
 2. 并行特征工程（300只股票，ThreadPoolExecutor，tqdm进度条）
 3. 全局 StandardScaler 标准化（130特征 + 波动率聚类 = 131列）
-4. 训练3个GBDT模型（并行）+ SpectralM
+4. 训练3个GBDT模型（GPU可用时串行避免显存竞争，无GPU时并行）+ SpectralM
 5. 串行训练3个PyTorch模型（per-stock序列，避免跨股票边界污染）
 6. 股票分组4折交叉验证生成OOF预测
 7. 训练Stacking元模型（NNLS vs IC优化，选IC更高的）
@@ -183,17 +237,22 @@
 ## 用法
 
 ```bash
+# 环境初始化（安装依赖）
+bash init.sh
+
 # 训练（拉数据 + 训练模型 + SHAP）
-python src/train.py
+bash train.sh
 
 # 预测
-python src/test.py                  # 多层筛选+复活赛（默认）
-python src/test.py --mode simple    # 单层流水线（快速baseline）
+bash test.sh                         # 多层筛选+复活赛（默认）
+python src/test.py --mode simple     # 单层流水线（快速baseline），需先 export PYTHONHASHSEED=42
 
 # Docker
 docker build -t bdc2026 .
 docker-compose up
 ```
+
+> `train.sh` / `test.sh` 内已设置 `export PYTHONHASHSEED=42`，直接 `python src/train.py` 会丢失此环境变量，建议始终通过 shell 脚本运行。
 
 ## 项目结构
 
@@ -214,7 +273,7 @@ bdc2026/
 │   │   │   ├── industry_cache.csv
 │   │   │   └── macro_cache.csv
 │   │   ├── src/
-│   │   │   ├── train.py          # 训练主程序（1330行）
+│   │   │   ├── train.py          # 训练主程序（1267行）
 │   │   │   ├── test.py           # 预测主程序
 │   │   │   ├── data_fetcher.py   # 多源数据加载
 │   │   │   ├── featurework.py    # 特征工程（9大类~130维）
@@ -256,4 +315,4 @@ bdc2026/
 
 ## 最后更新
 
-2026-05-12
+2026-05-13
