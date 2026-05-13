@@ -1,0 +1,28 @@
+# Python-generated files
+__pycache__/
+*.py[oc]
+build/
+dist/
+wheels/
+*.egg-info
+
+# Virtual environments
+.venv
+
+
+
+.DS_Store
+
+.vscode
+
+*.zip
+
+*.tar
+
+catboost_info/
+model/*/log/
+temp/
+logs/
+*.pth
+*.cbm
+*.pkl
