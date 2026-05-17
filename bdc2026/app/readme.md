@@ -10,31 +10,31 @@
 
 ### 系统
 - OS：Ubuntu 22.04（Docker 基础镜像 `nvidia/cuda:12.1.0-cudnn8-runtime-ubuntu22.04`）
-- Python：3.10.14
+- Python：3.11.11
 - CUDA：12.1
 - cuDNN：8
 
 ### Python 依赖（精确版本，跨机器复现必须一致）
 
 ```
-numpy==1.26.4
+numpy==2.4.4
 pandas==2.2.2
-scikit-learn==1.5.0
-lightgbm==4.3.0
-catboost==1.2.5
-xgboost==2.0.3
-torch==2.2.1
-torchvision==0.17.1
-torchaudio==2.2.1
-scipy==1.13.1
+scikit-learn==1.4.2
+lightgbm==4.6.0
+catboost==1.2.10
+xgboost==3.2.0
+torch==2.5.1
+torchvision==0.20.1
+torchaudio==2.5.1
+scipy==1.17.1
 statsmodels==0.14.2
-matplotlib==3.8.5
-shap>=0.44.0
+matplotlib==3.10.9
+shap>=0.51.0
 tqdm
 ```
 
-- 训练时间：约0.58小时（35分钟）
-- 预测时间：约2分钟
+- 训练时间：约0.62小时（37分钟）
+- 预测时间：约1分钟
 - **跨机器复现前提：请确保上述 Python 依赖版本完全一致，否则 cuDNN/cuBLAS 底层实现和算法行为差异可能导致数值偏差**
 
 ## 可复现性保证
@@ -91,19 +91,20 @@ tqdm
 
 | 模型 | 类型 | 参数量 | OOF IC | 集成权重 | 角色 |
 |------|------|--------|--------|---------|------|
-| XGBoost | GBDT | 500树×6层 | 0.419 | 主力 | 排序信号 |
-| LightGBM | GBDT | 500树×6层 | 0.394 | 主力 | 排序信号 |
-| CatBoost | GBDT (CPU) | 500树×6层 | 0.333 | 辅助 | 排序信号（CPU训练保证可复现） |
-| PatchTST | Patch+Transformer | ~500K | 0.258 | 补充 | 时序模式 |
-| DLinear | 线性趋势分解 | ~50K | 0.354 | 补充 | 复活赛裁判 |
-| TFT | LSTM+Attention+GRN | ~128K | 0.297 | 补充 | 复活赛裁判 |
-| SpectralM | HOAT+VME+SSM+AKRR | — | — | 谱信号 | 市场状态感知 |
+| XGBoost | GBDT | 500树×6层 | 0.416 | 主力 | 排序信号 |
+| LightGBM | GBDT | 500树×6层 | 0.390 | 被压缩 | 排序信号（与XGBoost信息冗余） |
+| CatBoost | GBDT (CPU) | 500树×6层 | 0.282 | 被压缩 | 排序信号（CPU训练保证可复现） |
+| PatchTST | Patch+Transformer | ~500K | 0.298 | 补充 | 时序模式 |
+| DLinear | 线性趋势分解 | ~50K | 0.363 | 补充 | 复活赛裁判 |
+| TFT | LSTM+Attention+GRN | ~128K | 0.310 | 补充 | 复活赛裁判 |
+| SpectralM | HOAT+VME+SSM+AKRR | — | 谱信号 | 补充 | 市场状态感知 |
 | **Stacking Ensemble** | IC优化加权 | — | **0.453** | — | 最终决策 |
 
 ### 关键训练配置
 
 - 目标：T+1开盘买入 → T+5开盘卖出（open-to-open）
-- 元模型：NNLS（MSE最小化） vs IC优化（Spearman最大化），选用IC更高的
+- 元模型：NNLS（MSE最小化, IC=0.4745） vs IC优化（Spearman最大化, IC=0.4811），选用IC更高的
+- 最终权重：XGBoost 0.416 → PatchTST 0.214 → SpectralM 0.147 → DLinear 0.121 → TFT 0.103，LightGBM/CatBoost 权重压缩为 0
 - 损失函数：MSE，GBDT用RMSE/regression，样本权重alpha=2.0
 - 批量大小：DL 512，ML全量
 - 验证策略：20%时间切分（按日期排序的最后20%作验证集）
@@ -237,22 +238,18 @@ tqdm
 ## 用法
 
 ```bash
-# 环境初始化（安装依赖）
-bash init.sh
-
 # 训练（拉数据 + 训练模型 + SHAP）
 bash train.sh
 
 # 预测
-bash test.sh                         # 多层筛选+复活赛（默认）
-python src/test.py --mode simple     # 单层流水线（快速baseline），需先 export PYTHONHASHSEED=42
+bash test.sh
 
 # Docker
 docker build -t bdc2026 .
 docker-compose up
 ```
 
-> `train.sh` / `test.sh` 内已设置 `export PYTHONHASHSEED=42`，直接 `python src/train.py` 会丢失此环境变量，建议始终通过 shell 脚本运行。
+> `train.sh` / `test.sh` 内已设置 `PYTHONHASHSEED=42`，自动探测 Python 路径（兼容 WSL / Git Bash），直接 `python src/train.py` 会丢失此环境变量，建议始终通过 shell 脚本运行。
 
 ## 项目结构
 
@@ -315,4 +312,4 @@ bdc2026/
 
 ## 最后更新
 
-2026-05-13
+2026-05-17
