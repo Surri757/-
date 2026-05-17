@@ -10,6 +10,9 @@ from datetime import datetime, timedelta
 
 np.random.seed(42)
 
+# ---- 固定日期（保证跨设备/跨时间复现） ----
+FIXED_DATE = '2026-05-10'
+
 # ---- 配置常量 ----
 LOOKBACK_DAYS = 365        # 动态1年数据窗口
 MIN_LISTED_YEARS = 0.5       # 动态窗口下放宽至半年
@@ -65,8 +68,8 @@ def download_baostock_data():
     print(f"获取到 {len(stock_codes)} 只成分股，开始下载全部日线数据...")
 
     all_data = []
-    end_date = datetime.now().strftime('%Y-%m-%d')
-    start_date = (datetime.now() - pd.Timedelta(days=LOOKBACK_DAYS)).strftime('%Y-%m-%d')
+    end_date = FIXED_DATE
+    start_date = (pd.Timestamp(FIXED_DATE) - pd.Timedelta(days=LOOKBACK_DAYS)).strftime('%Y-%m-%d')
     print(f"数据窗口: {start_date} ~ {end_date} (动态{LOOKBACK_DAYS}天)")
 
     bs.login()
@@ -361,8 +364,8 @@ def download_akshare_macro_data():
 def generate_macro_data():
     """回退方案：生成模拟宏观经济数据"""
     print("生成宏观经济模拟数据（基于历史合理区间）...")
-    start_date = (datetime.now() - pd.Timedelta(days=LOOKBACK_DAYS)).strftime('%Y-%m-%d')
-    dates = pd.date_range(start_date, datetime.now().strftime('%Y-%m-%d'), freq='M')
+    start_date = (pd.Timestamp(FIXED_DATE) - pd.Timedelta(days=LOOKBACK_DAYS)).strftime('%Y-%m-%d')
+    dates = pd.date_range(start_date, FIXED_DATE, freq='M')
 
     np.random.seed(42)
     macro_data = []
@@ -425,8 +428,8 @@ def generate_macro_data():
 def generate_industry_data():
     """生成申万行业指数模拟数据"""
     print("生成申万行业指数模拟数据...")
-    start_date = (datetime.now() - pd.Timedelta(days=LOOKBACK_DAYS)).strftime('%Y-%m-%d')
-    dates = pd.date_range(start_date, datetime.now().strftime('%Y-%m-%d'), freq='B')
+    start_date = (pd.Timestamp(FIXED_DATE) - pd.Timedelta(days=LOOKBACK_DAYS)).strftime('%Y-%m-%d')
+    dates = pd.date_range(start_date, FIXED_DATE, freq='B')
 
     sw_industries = [
         '银行', '非银金融', '房地产', '医药生物', '电子',
@@ -539,8 +542,8 @@ def _get_baostock_latest_date():
         if lg.error_code != '0':
             return None
         rs = bs.query_history_k_data_plus(
-            "sh.000300", "date", end_date=datetime.now().strftime('%Y-%m-%d'),
-            start_date=(datetime.now() - pd.Timedelta(days=7)).strftime('%Y-%m-%d'),
+            "sh.000300", "date", end_date=FIXED_DATE,
+            start_date=(pd.Timestamp(FIXED_DATE) - pd.Timedelta(days=7)).strftime('%Y-%m-%d'),
             frequency='d'
         )
         latest = None
@@ -652,8 +655,8 @@ def generate_simulated_stock_data(n_stocks=300):
     """生成模拟股票数据（离线备用模式）"""
     print(f"生成 {n_stocks} 只模拟股票数据...")
     np.random.seed(42)
-    start_date = (datetime.now() - pd.Timedelta(days=LOOKBACK_DAYS)).strftime('%Y-%m-%d')
-    dates = pd.date_range(start_date, datetime.now().strftime('%Y-%m-%d'), freq='B')
+    start_date = (pd.Timestamp(FIXED_DATE) - pd.Timedelta(days=LOOKBACK_DAYS)).strftime('%Y-%m-%d')
+    dates = pd.date_range(start_date, FIXED_DATE, freq='B')
 
     stocks = [f'{i:06d}' for i in range(1, n_stocks + 1)]
     data_list = []
