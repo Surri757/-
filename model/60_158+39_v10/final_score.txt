@@ -1,0 +1,4 @@
+Best epoch: 48
+Best combined_score: 0.081042
+Best portfolio_return: 0.081042
+V4: Dual-head model + portfolio-optimized loss + cs-rank features
